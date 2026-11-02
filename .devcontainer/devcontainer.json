@@ -1,0 +1,48 @@
+{
+  "name": "login-accounts-sandbox",
+  "build": { "dockerfile": "Dockerfile" },
+
+  // Everything runs as the normal "node" user, never root.
+  "remoteUser": "node",
+
+  // Needed only so the firewall script can set network rules at startup.
+  "runArgs": ["--cap-add=NET_ADMIN", "--cap-add=NET_RAW"],
+
+  // Only this repo folder is shared with the container. Your home folder,
+  // ~/.ssh, wallets and other projects are NOT visible inside.
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace",
+
+  // Keep agent logins and shell history across rebuilds, in Docker volumes
+  // (not your real home folder).
+  "mounts": [
+    "source=login-claude-config-${devcontainerId},target=/home/node/.claude,type=volume",
+    "source=login-codex-config-${devcontainerId},target=/home/node/.codex,type=volume",
+    "source=login-history-${devcontainerId},target=/commandhistory,type=volume"
+  ],
+
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
+    "HISTFILE": "/commandhistory/.bash_history",
+    "PROMPT_COMMAND": "history -a"
+  },
+
+  // Turn the firewall on every time the container starts, before you work.
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  "waitFor": "postStartCommand",
+
+  // Install project dependencies once, after the firewall allows npm.
+  "postCreateCommand": "if [ -f package-lock.json ]; then npm ci; fi",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "openai.chatgpt"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}
