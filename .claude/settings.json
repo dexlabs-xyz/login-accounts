@@ -6,7 +6,9 @@
       "Read(./**/*.pem)",
       "Read(./**/*.key)",
       "Bash(git push --force:*)",
-      "Bash(git push -f:*)"
+      "Bash(git push -f:*)",
+      "Edit(./AGENTS.md)",
+      "Edit(./.internal/**)"
     ]
   }
 }
