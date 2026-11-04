@@ -459,6 +459,9 @@ export function createApp({ config, db, mailer, outbox, now = Date.now }: Deps) 
     return c.json({
       userId: s.user.id,
       email: s.user.email,
+      // The random handle passkeys store for this user. Needed by the browser's
+      // signal API to tell password managers which passkeys are still valid.
+      webauthnUserId: s.user.webauthn_user_id,
       hasVault,
       credentials: credentialsOf(s.user.id).map(publicCredential),
     });

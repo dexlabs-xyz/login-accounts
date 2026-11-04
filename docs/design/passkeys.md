@@ -37,6 +37,24 @@ phrase and the Railgun wallet happens when the Railgun SDK is added.
 | D8 | Recovery, round 1: synced passkeys + "add a second passkey" (D4). Losing every passkey **and** the Apple/Google account means losing the funds; the UI says so. | Simple, no phrases. **Round 2 (next, before the hackathon ends): split-key recovery** — no single party, Login included, can decrypt. |
 | D9 | RP ID `withlogin.com` in production; `localhost` only in development. Config refuses anything else. | Browsers treat localhost as secure, so passkeys work locally without certificates. |
 
+### Adding a backup passkey
+
+"Add your phone" and "Add a security key" send a WebAuthn hint (`hybrid` /
+`security-key`, followed by Chrome) plus `authenticatorAttachment:
+cross-platform` (honoured by Safari), so the browser goes straight to the right
+device instead of defaulting to this computer's password manager. "Other
+options" leaves the choice to the browser.
+
+A passkey whose storage can't produce PRF (e.g. Brave's own passkey storage) is
+added as **sign-in only**, labelled with the reason, and the user can keep or
+remove it. A passkey added while the wallet was locked gets a **Connect**
+button. Unlock only offers passkeys that can open the wallet.
+
+After any change, the app calls `PublicKeyCredential.signalAllAcceptedCredentials`
+with the server's full list, so removed passkeys stop being offered by the
+password manager. It is only ever called with the complete list from the server,
+never an empty one, because the password manager hides anything left out.
+
 ### Smart accounts
 
 The private balance sits in Railgun and is controlled by Railgun keys, not a
@@ -70,8 +88,6 @@ Gas for shielding from them gets designed together with the deposit route.
 - **Split-key recovery** (D8 round 2): pieces held by Login, an independent
   partner, and the user; any two rebuild the key; each holder checks the user
   separately. Needs a team decision before building (new key handling).
-- **Removed passkeys** should also disappear from the user's password manager
-  (`PublicKeyCredential.signalAllAcceptedCredentials`). TODO in `apps/web/src/passkey.ts`.
 - **Real devices** need an HTTPS staging domain (e.g. `dev.withlogin.com`) with its
   own RP ID, so test passkeys don't mix with real `withlogin.com` ones.
 - `node:sqlite` is experimental in Node 22. Fine for the hackathon.

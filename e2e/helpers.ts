@@ -172,3 +172,33 @@ export async function disableAutofill(page: Page) {
       sessionStorage.getItem('e2e-autofill') === 'on' && (await original());
   });
 }
+
+/**
+ * Records what the app asks the browser for: the device hints on each
+ * passkey creation, and calls to the password-manager signal API.
+ */
+export async function recordWebAuthnCalls(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __creates: unknown[]; __signals: unknown[] };
+    w.__creates = [];
+    w.__signals = [];
+    const create = navigator.credentials.create.bind(navigator.credentials);
+    navigator.credentials.create = (opts?: CredentialCreationOptions) => {
+      const pk = opts?.publicKey as (PublicKeyCredentialCreationOptions & { hints?: string[] }) | undefined;
+      w.__creates.push({ hints: pk?.hints, attachment: pk?.authenticatorSelection?.authenticatorAttachment });
+      return create(opts);
+    };
+    const PKC = PublicKeyCredential as unknown as { signalAllAcceptedCredentials?: (o: unknown) => Promise<void> };
+    const original = PKC.signalAllAcceptedCredentials?.bind(PublicKeyCredential);
+    PKC.signalAllAcceptedCredentials = async (o: unknown) => {
+      w.__signals.push(o);
+      await original?.(o);
+    };
+  });
+  const read = <T>(key: '__creates' | '__signals') =>
+    page.evaluate((k) => (window as unknown as Record<string, unknown[]>)[k], key) as Promise<T[]>;
+  return {
+    creates: () => read<{ hints?: string[]; attachment?: string }>('__creates'),
+    signals: () => read<{ rpId: string; userId: string; allAcceptedCredentialIds: string[] }>('__signals'),
+  };
+}

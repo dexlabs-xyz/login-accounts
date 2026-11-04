@@ -7,6 +7,8 @@ import {
   removePasskey,
   setUpWalletHere,
   signIn,
+  syncPasskeysWithPasswordManager,
+  type PasskeyPlace,
   signUp,
   unlock,
   wallet,
@@ -95,7 +97,10 @@ function Main() {
 
   const refresh = useCallback(async () => {
     try {
-      setMe(await api<Me>('GET', '/api/me'));
+      const next = await api<Me>('GET', '/api/me');
+      setMe(next);
+      // Keep the password manager in step with the server (e.g. a passkey removed on another device).
+      void syncPasskeysWithPasswordManager(next);
     } catch {
       wallet.lock();
       setMe(null);
@@ -360,19 +365,36 @@ function Account({
             />
           ))}
         </ul>
-        <button
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              setSignInOnly(null);
-              const r = await addPasskey(me);
-              if (r.result === 'no-prf') setSignInOnly(r.credentialId);
-              else setNote(connectNote(r.result));
-            })
-          }
-        >
-          Add a passkey
-        </button>
+        <div className="add-passkey">
+          <p className="small">
+            <strong>Add a backup passkey.</strong> Put it somewhere other than this device, so losing one doesn’t lock you out.
+          </p>
+          <div className="row">
+            {(
+              [
+                ['phone', 'Add your phone', 'primary'],
+                ['security-key', 'Add a security key', ''],
+                ['any', 'Other options', 'link'],
+              ] as [PasskeyPlace, string, string][]
+            ).map(([place, label, cls]) => (
+              <button
+                key={place}
+                className={cls}
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    setSignInOnly(null);
+                    const r = await addPasskey(me, place);
+                    if (r.result === 'no-prf') setSignInOnly(r.credentialId);
+                    else setNote(connectNote(r.result));
+                  })
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         {me.hasVault && !open && <p className="muted small">Unlock your wallet first so a new passkey can open it too.</p>}
       </section>
 

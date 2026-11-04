@@ -39,6 +39,7 @@ export interface PublicCredential {
 export interface Me {
   userId: string;
   email: string;
+  webauthnUserId: string;
   hasVault: boolean;
   credentials: PublicCredential[];
 }
@@ -285,13 +286,35 @@ async function connectWith(me: Me, credentialId: string, prf: Bytes): Promise<vo
 }
 
 /** Add another passkey and let it open the wallet too (D1, D4). */
-export async function addPasskey(me: Me): Promise<{ result: ConnectResult; credentialId: string }> {
+/**
+ * Where the user wants the new passkey. 'phone' and 'security-key' ask for an
+ * external device: Chrome follows the hint and opens the QR code or security-key
+ * prompt directly; Safari ignores hints but honours "cross-platform".
+ * 'any' leaves the choice to the browser.
+ */
+export type PasskeyPlace = 'phone' | 'security-key' | 'any';
+
+function placeOptions(options: PublicKeyCredentialCreationOptionsJSON, place: PasskeyPlace) {
+  if (place === 'any') return options;
+  return {
+    ...options,
+    hints: [place === 'phone' ? ('hybrid' as const) : ('security-key' as const)],
+    authenticatorSelection: { ...options.authenticatorSelection, authenticatorAttachment: 'cross-platform' as const },
+  };
+}
+
+export async function addPasskey(
+  me: Me,
+  place: PasskeyPlace = 'any',
+): Promise<{ result: ConnectResult; credentialId: string }> {
   const { ceremonyId, options } = await api<{ ceremonyId: string; options: PublicKeyCredentialCreationOptionsJSON }>(
     'POST',
     '/api/passkeys/options',
     {},
   );
-  const response: RegistrationResponseJSON = await startRegistration({ optionsJSON: withPrf(options) });
+  const response: RegistrationResponseJSON = await startRegistration({
+    optionsJSON: withPrf(placeOptions(options, place)),
+  });
   const { safe, prf: prfAtCreate, prfEnabled } = takePrf(response);
   const { credential } = await api<{ credential: PublicCredential }>('POST', '/api/passkeys/verify', {
     ceremonyId,
@@ -337,9 +360,32 @@ export async function removePasskey(me: Me, credentialId: string): Promise<void>
     if (r.userId !== me.userId) throw new Error('That passkey belongs to a different Login account.');
     await api('DELETE', `/api/passkeys/${encodeURIComponent(credentialId)}`);
   }
-  // TODO: call PublicKeyCredential.signalAllAcceptedCredentials so the removed
-  // passkey disappears from the user's password manager. Needs the WebAuthn
-  // user handle from /api/me.
+  await syncPasskeysWithPasswordManager(await api<Me>('GET', '/api/me'));
+}
+
+/**
+ * Tell the browser's password manager which of this user's passkeys are still
+ * valid, so removed ones stop being offered. Supported in recent Chrome and
+ * Safari; silently skipped elsewhere. Sends nothing to our server.
+ */
+export async function syncPasskeysWithPasswordManager(me: Me): Promise<void> {
+  const signal = (
+    PublicKeyCredential as unknown as {
+      signalAllAcceptedCredentials?: (o: {
+        rpId: string;
+        userId: string;
+        allAcceptedCredentialIds: string[];
+      }) => Promise<void>;
+    }
+  ).signalAllAcceptedCredentials;
+  if (!signal || me.credentials.length === 0) return;
+  await signal
+    .call(PublicKeyCredential, {
+      rpId: location.hostname,
+      userId: me.webauthnUserId,
+      allAcceptedCredentialIds: me.credentials.map((c) => c.id),
+    })
+    .catch(() => {});
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array) {

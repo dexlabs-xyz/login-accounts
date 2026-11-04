@@ -57,3 +57,5 @@ button.danger { color: var(--error); }
 .passkeys li { display: flex; justify-content: space-between; gap: 0.75rem; align-items: start; }
 .outbox li { border-bottom: 1px solid var(--line); padding-bottom: 0.75rem; }
 code { font-family: ui-monospace, monospace; }
+.add-passkey { display: grid; gap: 0.5rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
+.add-passkey .row { justify-content: flex-start; align-items: center; }

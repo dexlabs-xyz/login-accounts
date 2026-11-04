@@ -3,7 +3,7 @@
  * (docs/design/passkeys.md).
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, freshEmail, recordSecrets, signOut, signUp, verifyEmail, walletCheck } from './helpers.ts';
+import { Device, disableAutofill, freshEmail, recordSecrets, recordWebAuthnCalls, signOut, signUp, verifyEmail, walletCheck } from './helpers.ts';
 
 // Chrome's virtual authenticator answers autofill requests instantly, which a
 // real user never does. Keep autofill off except where a test turns it on.
@@ -113,8 +113,8 @@ test.describe('multiple passkeys (D1, D4)', () => {
 
     // Add a synced phone passkey while the wallet is open.
     await laptop.remove();
-    const phone = await Device.add(page, { synced: true });
-    await page.getByRole('button', { name: 'Add a passkey' }).click();
+    const phone = await Device.add(page, { synced: true, transport: 'usb' });
+    await page.getByRole('button', { name: 'Add your phone' }).click();
     await expect(page.getByText('This passkey can now open your wallet on its own.')).toBeVisible();
     await expect(page.getByText('You could lose access')).toHaveCount(0);
     expect(await phone.credentials()).toHaveLength(1);
@@ -131,7 +131,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await signUp(page);
     await laptop.remove();
     await Device.add(page, { prf: false }); // sign-in only passkey
-    await page.getByRole('button', { name: 'Add a passkey' }).click();
+    await page.getByRole('button', { name: 'Other options' }).click();
     await page.getByRole('button', { name: 'Keep for signing in' }).click();
 
     const walletRow = page.getByRole('listitem').filter({ hasText: 'opens wallet' });
@@ -144,17 +144,18 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await signUp(page);
     await laptop.remove();
     const brave = await Device.add(page, { prf: false, synced: false });
-    await page.getByRole('button', { name: 'Add a passkey' }).click();
+    await page.getByRole('button', { name: 'Other options' }).click();
 
     const panel = page.getByRole('alert', { name: 'Sign-in only passkey' });
     await expect(panel).toContainText('not a backup for your money');
     await panel.getByRole('button', { name: 'Remove it' }).click();
     await expect(page.getByText('Removed.')).toBeVisible();
     await expect(page.getByRole('listitem')).toHaveCount(1);
-    expect(await brave.credentials()).toHaveLength(1); // still on the device; the server no longer accepts it
+    // The password manager was told it's no longer valid, so the browser removed it too.
+    await expect.poll(async () => (await brave.credentials()).length).toBe(0);
 
     // Keep path: label says why, and there's no Connect button.
-    await page.getByRole('button', { name: 'Add a passkey' }).click();
+    await page.getByRole('button', { name: 'Other options' }).click();
     await page.getByRole('button', { name: 'Keep for signing in' }).click();
     const row = page.getByRole('listitem').filter({ hasText: 'can’t open wallets' });
     await expect(row).toBeVisible();
@@ -169,7 +170,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
 
     const phone = await Device.add(page, { synced: true, transport: 'usb' });
     await laptop.setResponds(false); // the user registers on the phone
-    await page.getByRole('button', { name: 'Add a passkey' }).click();
+    await page.getByRole('button', { name: 'Add your phone' }).click();
     await laptop.setResponds(true);
     await expect(page.getByText('press “Connect” next to it')).toBeVisible();
     const phoneRow = page.getByRole('listitem').filter({ hasText: 'not connected to your wallet yet' });
@@ -192,6 +193,55 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await expect(page.getByText('Unlocked')).toBeVisible();
     expect(await walletCheck(page)).toBe(before);
     expect(await phone.credentials()).toHaveLength(1);
+  });
+});
+
+test.describe('choosing where a backup passkey goes', () => {
+  test('each button asks the browser for the right kind of device', async ({ page }) => {
+    const calls = await recordWebAuthnCalls(page);
+    await Device.add(page);
+    await signUp(page);
+    await Device.add(page, { transport: 'usb' });
+
+    const expected: [string, string[] | undefined, string | undefined][] = [
+      ['Add your phone', ['hybrid'], 'cross-platform'],
+      ['Add a security key', ['security-key'], 'cross-platform'],
+    ];
+    for (const [button, hints, attachment] of expected) {
+      const before = (await calls.creates()).length;
+      await page.getByRole('button', { name: button }).click();
+      await expect.poll(async () => (await calls.creates()).length).toBe(before + 1);
+      await expect(page.getByRole('button', { name: button })).toBeEnabled();
+      const last = (await calls.creates()).at(-1)!;
+      expect(last.hints, button).toEqual(hints);
+      expect(last.attachment, button).toBe(attachment);
+    }
+    // Sign-up leaves the choice to the browser: no hints, no device restriction.
+    const signUpCall = (await calls.creates())[0]!;
+    expect(signUpCall.hints ?? []).toEqual([]);
+    expect(signUpCall.attachment).toBeUndefined();
+  });
+
+  test('removing a passkey tells the password manager which passkeys are still valid', async ({ page }) => {
+    const calls = await recordWebAuthnCalls(page);
+    const laptop = await Device.add(page);
+    await signUp(page);
+    await laptop.setResponds(false);
+    const key = await Device.add(page, { transport: 'usb' });
+    await page.getByRole('button', { name: 'Add a security key' }).click();
+    await expect(page.getByText('This passkey can now open your wallet on its own.')).toBeVisible();
+    await laptop.setResponds(true);
+    const [keyCred] = await key.credentials();
+
+    // The security key is the second passkey in the list.
+    await page.getByRole('listitem').nth(1).getByRole('button', { name: 'Remove' }).click();
+    await expect(page.getByRole('listitem')).toHaveCount(1);
+
+    await expect.poll(async () => (await calls.signals()).length).toBeGreaterThan(0);
+    const last = (await calls.signals()).at(-1)!;
+    expect(last.rpId).toBe('localhost');
+    expect(last.allAcceptedCredentialIds).toHaveLength(1);
+    expect(last.allAcceptedCredentialIds).not.toContain(keyCred!.credentialId);
   });
 });
 
