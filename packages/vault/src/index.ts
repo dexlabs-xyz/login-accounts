@@ -176,6 +176,32 @@ export function closeVault(open: OpenVault | null): void {
   open?.rootSecret.fill(0);
 }
 
+/**
+ * Labels for keys derived from the root secret. Each use gets its own label so
+ * no two features ever share a key. Never reuse or edit a label; add a new one.
+ */
+export const DERIVED_KEY_LABELS = {
+  /** Encrypts the Railgun SDK's local wallet database (IndexedDB) on this device. */
+  railgunDbKey: 'withlogin.com/derive/railgun-db-key/v1',
+} as const;
+
+const DERIVE_SALT = new TextEncoder().encode('withlogin.com/derive/hkdf/v1');
+
+/**
+ * Derive 32 bytes for one labelled purpose from the root secret (HKDF-SHA256,
+ * WebCrypto). One-way: the result reveals nothing about the root secret or
+ * about keys derived with other labels.
+ */
+export async function deriveKeyMaterial(
+  rootSecret: Bytes,
+  label: (typeof DERIVED_KEY_LABELS)[keyof typeof DERIVED_KEY_LABELS],
+): Promise<Bytes> {
+  if (rootSecret.byteLength !== ROOT_SECRET_BYTES) throw new Error('Root secret must be 32 bytes.');
+  const ikm = await subtle().importKey('raw', rootSecret, 'HKDF', false, ['deriveBits']);
+  const bits = await subtle().deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: DERIVE_SALT, info: enc(label) }, ikm, 256);
+  return new Uint8Array(bits);
+}
+
 export function b64u(bytes: Uint8Array): string {
   let s = '';
   for (const b of bytes) s += String.fromCharCode(b);

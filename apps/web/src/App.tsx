@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
+import { privateWallet } from './railgun/client.ts';
 import {
   addPasskey,
   connectPasskey,
@@ -90,6 +91,88 @@ export function App() {
 
 function useWalletOpen() {
   return useSyncExternalStore(wallet.subscribe, wallet.isOpen);
+}
+
+function usePrivateWallet() {
+  return useSyncExternalStore(privateWallet.subscribe, privateWallet.get);
+}
+
+const BUCKET_LABELS: Record<string, string> = {
+  Spendable: 'Spendable',
+  ShieldPending: 'Arriving (being checked)',
+  ShieldBlocked: 'Blocked by sanctions screening',
+  ProofSubmitted: 'Being confirmed',
+  MissingInternalPOI: 'Waiting for privacy check',
+  MissingExternalPOI: 'Waiting for privacy check',
+};
+
+/** Private balance from the Railgun wallet (Sepolia testnet). Shown only while unlocked. */
+function PrivateBalance() {
+  const pw = usePrivateWallet();
+  const [copied, setCopied] = useState(false);
+  if (pw.status === 'off') return null;
+  const rows = Object.entries(pw.balances)
+    .filter(([bucket]) => bucket !== 'Spent')
+    .flatMap(([bucket, list]) => (list ?? []).filter((t) => t.amount !== '0').map((t) => ({ bucket, ...t })));
+  return (
+    <section className="card" aria-labelledby="private-h">
+      <h2 id="private-h">
+        Private balance <span className="badge">Sepolia testnet</span>
+      </h2>
+      {pw.status === 'error' && (
+        <p className="error" role="alert">
+          Couldn’t load your private balance. Lock and unlock to try again.
+        </p>
+      )}
+      {pw.status === 'starting' && <p className="muted">Opening your private wallet…</p>}
+      {pw.status === 'needs-poi' && (
+        <p className="muted small" role="status">
+          Balance not available yet: this test build has no Railgun Proof of Innocence node configured.
+        </p>
+      )}
+      {pw.railgunAddress && (
+        <div className="stack">
+          <div className="small muted">Your private address (share it to receive privately)</div>
+          <div className="row">
+            <code className="address" title={pw.railgunAddress}>
+              {pw.railgunAddress.slice(0, 12)}…{pw.railgunAddress.slice(-8)}
+            </code>
+            <button
+              className="link"
+              onClick={() =>
+                void navigator.clipboard.writeText(pw.railgunAddress!).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                })
+              }
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+      {pw.status === 'syncing' && (
+        <p className="muted small" role="status">
+          Syncing… {Math.round(pw.scanProgress * 100)}%
+        </p>
+      )}
+      {(pw.status === 'ready' || pw.status === 'syncing') &&
+        (rows.length === 0 ? (
+          <p data-testid="private-empty">{pw.status === 'ready' ? 'No private funds yet.' : ''}</p>
+        ) : (
+          <ul className="passkeys">
+            {rows.map((r) => (
+              <li key={r.bucket + r.tokenAddress}>
+                <code>{r.tokenAddress.slice(0, 8)}…</code>
+                <span>
+                  {r.amount} <span className="muted small">({BUCKET_LABELS[r.bucket] ?? r.bucket})</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ))}
+    </section>
+  );
 }
 
 function Main() {
@@ -415,6 +498,8 @@ function Account({
           </>
         )}
       </section>
+
+      {me.hasVault && open && <PrivateBalance />}
 
       {atRisk && (
         <section className="warning" role="alert">

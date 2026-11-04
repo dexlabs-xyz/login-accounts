@@ -24,6 +24,7 @@ import {
   type WrappedKey,
 } from '@login/vault';
 import { api, ApiError } from './api.ts';
+import { privateWallet } from './railgun/client.ts';
 
 export interface PublicCredential {
   id: string;
@@ -87,6 +88,7 @@ export const wallet = {
     return Array.from(h.slice(0, 4), (b) => b.toString(16).padStart(2, '0')).join('');
   },
   lock() {
+    privateWallet.stop(); // terminates the Railgun worker and the keys it held
     closeVault(open);
     open = null;
     openUserId = null;
@@ -105,9 +107,12 @@ export const wallet = {
 };
 
 function setOpen(v: OpenVault, userId: string) {
+  const sameWallet = open !== null && openUserId === userId;
   closeVault(open);
   open = v;
   openUserId = userId;
+  // Re-unlocking (e.g. confirming a send) keeps the running wallet; a new unlock starts it.
+  if (!sameWallet) void privateWallet.start(v.rootSecret.slice());
   wallet.touch();
   listeners.forEach((l) => l());
 }
