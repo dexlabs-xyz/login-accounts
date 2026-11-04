@@ -1,7 +1,8 @@
 /** Messages between the page and the Railgun worker. Nothing here is sent over the network. */
 
 export type ToWorker =
-  | { type: 'open'; mnemonic: string; dbKeyHex: string; poiNodeURLs: string[] }
+  /** rootSecret is transferred (not copied): the page's copy is wiped by the transfer. */
+  | { type: 'open'; rootSecret: ArrayBuffer; poiNodeURLs: string[] }
   | { type: 'refresh' };
 
 export type BalanceBucket =

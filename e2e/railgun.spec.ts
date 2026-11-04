@@ -13,6 +13,13 @@ test.beforeEach(async ({ page }) => {
   page.on('pageerror', (e) => console.log('[pageerror]', e.name));
 });
 
+// On failure, show what the user would have seen in the wallet section.
+test.afterEach(async ({ page }, info) => {
+  if (info.status === info.expectedStatus) return;
+  const card = page.getByRole('region', { name: /Private balance/ });
+  console.log('[private balance at failure]', (await card.count()) ? (await card.innerText()).replace(/\n+/g, ' | ') : '(not shown)');
+});
+
 test('unlocking opens a Railgun wallet: 0zk address', async ({ page }) => {
   await Device.add(page);
   await signUp(page);

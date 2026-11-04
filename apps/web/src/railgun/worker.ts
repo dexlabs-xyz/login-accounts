@@ -29,6 +29,8 @@ import {
   startRailgunEngine,
 } from '@railgun-community/wallet';
 import { NETWORK_CONFIG, NetworkName, type RailgunBalancesEvent } from '@railgun-community/shared-models';
+import { Mnemonic } from 'ethers';
+import { DERIVED_KEY_LABELS, deriveKeyMaterial } from '@login/vault';
 import type { FromWorker, ToWorker } from './protocol.ts';
 
 const NETWORK = NetworkName.EthereumSepolia;
@@ -104,7 +106,15 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
       await startEngine(msg.poiNodeURLs);
       // Deterministic: the same phrase and key give the same wallet every time.
       // Needs no network: the address comes from the keys alone.
-      const info = await createRailgunWallet(msg.dbKeyHex, msg.mnemonic, undefined);
+      // The phrase and DB key exist only here, in the worker.
+      const rootSecret = new Uint8Array(msg.rootSecret);
+      // BIP-39: the 32-byte root secret is the entropy of a 24-word phrase (never shown).
+      const mnemonic = Mnemonic.fromEntropy(rootSecret).phrase;
+      const dbKey = await deriveKeyMaterial(rootSecret, DERIVED_KEY_LABELS.railgunDbKey);
+      rootSecret.fill(0);
+      const dbKeyHex = Array.from(dbKey, (x) => x.toString(16).padStart(2, '0')).join('');
+      dbKey.fill(0);
+      const info = await createRailgunWallet(dbKeyHex, mnemonic, undefined);
       walletId = info.id;
       post({ type: 'opened', railgunAddress: info.railgunAddress });
 
@@ -118,6 +128,7 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
         NETWORK,
         15_000,
       );
+      // Starts this wallet's balance scan (loading the provider alone doesn't).
       await refreshBalances(CHAIN, [info.id]);
     } else if (msg.type === 'refresh' && walletId) {
       await refreshBalances(CHAIN, [walletId]);

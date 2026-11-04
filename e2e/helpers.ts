@@ -1,4 +1,6 @@
 import { expect, type CDPSession, type Page } from '@playwright/test';
+import { Mnemonic } from 'ethers';
+import { DERIVED_KEY_LABELS, deriveKeyMaterial } from '../packages/vault/src/index.ts';
 
 /**
  * Chrome's virtual authenticator: a software passkey device we fully control.
@@ -112,8 +114,9 @@ export async function signOut(page: Page) {
 /**
  * Records every secret the page handles, so tests can prove none of them ever
  * leaves the device: PRF outputs (from getClientExtensionResults), the
- * plaintext the vault encrypts (the root secret), and the recovery phrase and
- * Railgun DB key handed to the Railgun worker. Checks every request, including
+ * plaintext the vault encrypts (the root secret), the root secret transferred to
+ * the Railgun worker, and the recovery phrase and Railgun DB key the worker
+ * derives from it (recomputed here). Checks every request, including
  * the worker's, plus browser storage. Test-only instrumentation; the app
  * itself exposes nothing.
  */
@@ -137,15 +140,11 @@ export async function recordSecrets(page: Page) {
       seen.push(hex(data as ArrayBuffer));
       return enc(alg, key, data);
     };
-    // The recovery phrase and Railgun DB key, as handed to the Railgun worker.
-    const phrases: string[] = ((window as unknown as { __phrases: string[] }).__phrases = []);
+    // The root secret as transferred to the Railgun worker (captured before the transfer empties it).
     const post = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function (this: Worker, msg: unknown, ...rest: unknown[]) {
-      const m = msg as { type?: string; mnemonic?: string; dbKeyHex?: string };
-      if (m?.type === 'open') {
-        if (m.mnemonic) phrases.push(m.mnemonic);
-        if (m.dbKeyHex) seen.push(m.dbKeyHex);
-      }
+      const m = msg as { type?: string; rootSecret?: ArrayBuffer };
+      if (m?.type === 'open' && m.rootSecret) seen.push(hex(m.rootSecret));
       return (post as (...a: unknown[]) => void).call(this, msg, ...rest);
     } as typeof Worker.prototype.postMessage;
   });
@@ -160,9 +159,15 @@ export async function recordSecrets(page: Page) {
     /** Hostnames seen so far, to prove the recorder actually captured the traffic it checks. */
     hosts: () => [...hosts],
     async assertNoLeaks() {
-      const secrets = await page.evaluate(() => (window as unknown as { __secrets: string[] }).__secrets);
-      const phrases = await page.evaluate(() => (window as unknown as { __phrases: string[] }).__phrases);
+      const secrets = [...new Set(await page.evaluate(() => (window as unknown as { __secrets: string[] }).__secrets))];
       expect(secrets.length, 'test should have observed some secrets').toBeGreaterThan(0);
+      // The worker derives these from any 32-byte root secret; compute them here the same way.
+      const phrases: string[] = [];
+      for (const h of secrets.filter((x) => x.length === 64)) {
+        const root = new Uint8Array(Buffer.from(h, 'hex'));
+        phrases.push(Mnemonic.fromEntropy(root).phrase);
+        secrets.push(Buffer.from(await deriveKeyMaterial(root, DERIVED_KEY_LABELS.railgunDbKey)).toString('hex'));
+      }
       const stored = await page.evaluate(async () => ({
         local: JSON.stringify({ ...localStorage }),
         session: JSON.stringify({ ...sessionStorage }),

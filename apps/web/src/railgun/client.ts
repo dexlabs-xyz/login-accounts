@@ -1,9 +1,9 @@
 /**
- * Page-side handle on the Railgun worker. The page never holds the recovery
- * phrase longer than it takes to hand it to the worker.
+ * Page-side handle on the Railgun worker. The page never sees the recovery
+ * phrase or the Railgun DB key: it transfers the root secret to the worker,
+ * which wipes the page's copy, and the worker derives both.
  */
-import { Mnemonic } from 'ethers';
-import { DERIVED_KEY_LABELS, deriveKeyMaterial, type Bytes } from '@login/vault';
+import type { Bytes } from '@login/vault';
 import type { BalanceBucket, FromWorker } from './protocol.ts';
 
 /**
@@ -34,7 +34,6 @@ function set(next: Partial<PrivateWalletState>) {
   listeners.forEach((l) => l());
 }
 
-const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
 export const privateWallet = {
   get: () => state,
@@ -44,13 +43,9 @@ export const privateWallet = {
   },
 
   /** Start the Railgun wallet for this root secret (called when the vault opens). */
-  async start(rootSecret: Bytes): Promise<void> {
+  start(rootSecret: Bytes): void {
     privateWallet.stop();
     set({ ...initial, status: 'starting' });
-    // BIP-39: the 32-byte root secret is the entropy of a 24-word phrase (never shown).
-    const mnemonic = Mnemonic.fromEntropy(rootSecret).phrase;
-    const dbKey = await deriveKeyMaterial(rootSecret, DERIVED_KEY_LABELS.railgunDbKey);
-
     worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module', name: 'railgun' });
     worker.onmessage = (ev: MessageEvent<FromWorker>) => {
       const m = ev.data;
@@ -69,9 +64,10 @@ export const privateWallet = {
       if (import.meta.env.DEV) console.error('[railgun worker]', e.message, e.filename, e.lineno);
       set({ status: 'error', error: 'WorkerError' });
     };
-    worker.postMessage({ type: 'open', mnemonic, dbKeyHex: toHex(dbKey), poiNodeURLs: POI_NODE_URLS });
-    dbKey.fill(0);
+    // Transfer, not copy: after this line the page's buffer is empty (detached).
+    const secret = rootSecret.buffer.slice(rootSecret.byteOffset, rootSecret.byteOffset + rootSecret.byteLength);
     rootSecret.fill(0); // callers pass a copy
+    worker.postMessage({ type: 'open', rootSecret: secret, poiNodeURLs: POI_NODE_URLS }, [secret]);
   },
 
   refresh() {
