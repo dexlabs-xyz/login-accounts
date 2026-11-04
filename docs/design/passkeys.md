@@ -88,7 +88,11 @@ the gas to shield, so EIP-7702 delegation or a paymaster is the likely answer.
 **Decided (2026-11-04): a fresh deposit address for every deposit**, so deposits
 can't be linked to each other on-chain. They are numbered addresses derived from
 the same root secret, so they need no extra backup and the user never sees them.
-Gas for shielding from them gets designed together with the deposit route.
+**Decided (2026-11-04): gas for a fresh deposit address comes with the deposit.**
+Tidepool delivers a small amount of Sepolia ETH to the same fresh address
+alongside the token, so the address pays its own shielding gas. No Login-run
+gas sponsor (it would see every deposit address and its timing). Cost: a second
+swap fee per deposit.
 
 ## Verifying external contracts
 
