@@ -9,9 +9,14 @@
   },
   "dependencies": {
     "@login/vault": "*",
+    "@railgun-community/engine": "9.9.1",
+    "@railgun-community/shared-models": "8.2.1",
+    "@railgun-community/wallet": "11.2.0",
     "@simplewebauthn/browser": "14.0.0",
+    "level-js": "6.1.0",
     "react": "19.1.10",
-    "react-dom": "19.1.10"
+    "react-dom": "19.1.10",
+    "snarkjs": "0.7.6"
   },
   "devDependencies": {
     "@types/react": "19.3.0",
