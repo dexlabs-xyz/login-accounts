@@ -1,7 +1,8 @@
 import { serve } from '@hono/node-server';
-import { createApp, devOutboxMailer, type Mailer, type OutboxEmail } from './app.ts';
+import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { openDb } from './db.ts';
+import { devOutboxMailer, type Mailer, type OutboxEmail } from './mail.ts';
 
 const config = loadConfig();
 const outbox: OutboxEmail[] = [];
@@ -14,7 +15,7 @@ if (config.devOutbox) {
   throw new Error('No email provider configured. Set DEV_OUTBOX=1 for local development.');
 }
 
-const app = createApp({ config, db: openDb(config.dbPath), mailer, outbox });
+const { app } = createApp({ config, db: openDb(config.dbPath), mailer, outbox });
 
 serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' }, ({ port }) => {
   console.log(`Login API on http://127.0.0.1:${port} (RP ID: ${config.rpId})`);

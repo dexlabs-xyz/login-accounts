@@ -84,6 +84,7 @@ function outcomeNote(o: WalletOutcome): string | null {
 export function App() {
   const path = location.pathname;
   if (path === '/dev/outbox') return <DevOutbox />;
+  if (path === '/signin') return <SignInHandoff />;
   return <Main />;
 }
 
@@ -133,7 +134,17 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 // ---------- join / sign in (D2) ----------
 
-function Join({ onDone }: { onDone: (o: WalletOutcome) => void }) {
+function Join({
+  onDone,
+  heading = 'Sign up or sign in',
+  intro,
+  onCancel,
+}: {
+  onDone: (o: WalletOutcome) => void;
+  heading?: string;
+  intro?: string;
+  onCancel?: () => void;
+}) {
   const [step, setStep] = useState<'email' | 'code' | 'working'>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -193,7 +204,8 @@ function Join({ onDone }: { onDone: (o: WalletOutcome) => void }) {
 
   return (
     <Shell>
-      <h1>Sign up or sign in</h1>
+      <h1>{heading}</h1>
+      {intro && <p className="muted">{intro}</p>}
       {step === 'email' && (
         <form className="stack" onSubmit={(e) => (e.preventDefault(), void sendCode())}>
           <label>
@@ -244,7 +256,75 @@ function Join({ onDone }: { onDone: (o: WalletOutcome) => void }) {
       {step === 'working' && <p className="muted">Waiting for your passkey…</p>}
       {info && <p className="info" role="status">{info}</p>}
       {error && <p className="error" role="alert">{error}</p>}
+      {onCancel && (
+        <button type="button" className="link" onClick={onCancel}>
+          Cancel and go back to the app
+        </button>
+      )}
     </Shell>
+  );
+}
+
+// ---------- sign-in handoff for OIDC (apps using "Sign in with Login") ----------
+
+const INTERACTION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * /signin?interaction=<id>[&fresh=1]. Contract: apps/server/src/oidc/README.md.
+ * Only ever redirects to two fixed paths built from a validated ID: never to a
+ * URL from the query string, so this page can't be used as an open redirect.
+ */
+function SignInHandoff() {
+  const params = new URLSearchParams(location.search);
+  const interaction = params.get('interaction') ?? '';
+  const fresh = params.get('fresh') === '1';
+  const valid = INTERACTION_ID.test(interaction);
+  const [state, setState] = useState<'checking' | 'sign-in' | 'leaving'>('checking');
+
+  const complete = useCallback(() => {
+    setState('leaving');
+    location.assign(`/oidc/interaction/${interaction}/complete`);
+  }, [interaction]);
+  const cancel = () => {
+    setState('leaving');
+    location.assign(`/oidc/interaction/${interaction}/abort?reason=cancelled`);
+  };
+
+  useEffect(() => {
+    if (!valid) return;
+    if (fresh) {
+      setState('sign-in'); // the app asked for a new passkey check, even if signed in
+      return;
+    }
+    api('GET', '/api/me').then(complete, () => setState('sign-in'));
+  }, [valid, fresh, complete]);
+
+  if (!valid) {
+    return (
+      <Shell>
+        <h1>This sign-in link doesn’t work</h1>
+        <p role="alert" className="error">Go back to the app you came from and try signing in again.</p>
+      </Shell>
+    );
+  }
+  if (state !== 'sign-in') {
+    return (
+      <Shell>
+        <p className="muted">{state === 'leaving' ? 'Taking you back to the app…' : 'Checking…'}</p>
+      </Shell>
+    );
+  }
+  return (
+    <Join
+      heading={fresh ? 'Confirm it’s you' : 'Sign in to continue'}
+      intro={
+        fresh
+          ? 'The app asked Login to check again with your passkey.'
+          : 'Use your Login passkey. The app only gets what you agree to share.'
+      }
+      onDone={complete}
+      onCancel={cancel}
+    />
   );
 }
 

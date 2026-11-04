@@ -27,7 +27,11 @@ npm run typecheck
 ## Layout
 
 - `packages/vault` — encrypts the wallet secret so only the user's passkeys can open it
-- `apps/server` — API: email codes, passkey sign-up/sign-in, encrypted vault storage
+- `apps/server` — the one Login API server
+  - `src/passkeys/` — email codes, passkey sign-up/sign-in, sessions, encrypted vault storage (passkeys team)
+  - `src/oidc/` — OpenID Connect provider (Login infra team). Contract: [`src/oidc/README.md`](apps/server/src/oidc/README.md)
+  - `src/migrations/` — numbered database migrations; each team owns its tables
+  - `src/app.ts`, `main.ts`, `config.ts`, `db.ts`, `http.ts`, `mail.ts` — shared; changes need both teams' review
 - `apps/web` — the withlogin.com app
 - `e2e` — browser tests
 - `docs/design` — design decisions ([passkeys](docs/design/passkeys.md))

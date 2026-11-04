@@ -3,13 +3,14 @@
  * Chrome's virtual authenticator) live in e2e/.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createApp, devOutboxMailer, type OutboxEmail } from './app.ts';
-import { loadConfig } from './config.ts';
-import { openDb } from './db.ts';
+import { createApp } from '../app.ts';
+import { loadConfig } from '../config.ts';
+import { openDb } from '../db.ts';
+import { devOutboxMailer, type OutboxEmail } from '../mail.ts';
 
 let clock = 1_000_000;
 let outbox: OutboxEmail[];
-let app: ReturnType<typeof createApp>;
+let app: ReturnType<typeof createApp>['app'];
 
 const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
   app.request(path, {
@@ -24,7 +25,7 @@ beforeEach(() => {
   clock = 1_000_000;
   outbox = [];
   const config = loadConfig({ DEV_OUTBOX: '1' } as NodeJS.ProcessEnv);
-  app = createApp({ config, db: openDb(':memory:'), mailer: devOutboxMailer(outbox), outbox, now: () => clock });
+  ({ app } = createApp({ config, db: openDb(':memory:'), mailer: devOutboxMailer(outbox), outbox, now: () => clock }));
 });
 
 describe('config', () => {

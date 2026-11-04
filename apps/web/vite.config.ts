@@ -9,6 +9,11 @@ export default defineConfig({
     host: '127.0.0.1', // IPv4: VS Code port forwarding connects here (container 'localhost' is IPv6-only)
     port: 5180,
     strictPort: true,
-    proxy: { '/api': 'http://127.0.0.1:8787' },
+    // /oidc and /.well-known belong to the OIDC provider in the same API server.
+    proxy: {
+      '/api': 'http://127.0.0.1:8787',
+      '/oidc': 'http://127.0.0.1:8787',
+      '/.well-known': 'http://127.0.0.1:8787',
+    },
   },
 });

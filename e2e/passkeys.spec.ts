@@ -3,7 +3,7 @@
  * (docs/design/passkeys.md).
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, freshEmail, recordSecrets, recordWebAuthnCalls, signOut, signUp, verifyEmail, walletCheck } from './helpers.ts';
+import { Device, disableAutofill, freshEmail, latestCode, recordSecrets, recordWebAuthnCalls, signOut, signUp, verifyEmail, walletCheck } from './helpers.ts';
 
 // Chrome's virtual authenticator answers autofill requests instantly, which a
 // real user never does. Keep autofill off except where a test turns it on.
@@ -258,6 +258,68 @@ test.describe('choosing where a backup passkey goes', () => {
     expect(last.allAcceptedCredentialIds).toHaveLength(1);
     expect(last.allAcceptedCredentialIds).not.toContain(keyCred!.credentialId);
   });
+});
+
+test.describe('sign-in handoff for apps (OIDC contract)', () => {
+  const complete = (id: string) => new RegExp(`/oidc/interaction/${id}/complete$`);
+
+  const uses = async (d: Device) => (await d.credentials())[0]!.signCount;
+
+  test('already signed in: goes straight back to OIDC with no prompt', async ({ page }) => {
+    const device = await Device.add(page);
+    await signUp(page);
+    const before = await uses(device);
+    await page.goto('/signin?interaction=abc123');
+    await page.waitForURL(complete('abc123'));
+    expect(await uses(device)).toBe(before); // the passkey wasn't used
+  });
+
+  test('signed out: passkey sign-in, then back to OIDC', async ({ page }) => {
+    await Device.add(page);
+    await signUp(page);
+    await signOut(page);
+    await page.goto('/signin?interaction=abc123');
+    await expect(page.getByRole('heading', { name: 'Sign in to continue' })).toBeVisible();
+    await page.getByRole('button', { name: 'Sign in with passkey' }).click();
+    await page.waitForURL(complete('abc123'));
+  });
+
+  test('new user: signs up inside the handoff, then back to OIDC', async ({ page }) => {
+    await Device.add(page);
+    const email = freshEmail();
+    await page.goto('/signin?interaction=new_user-1');
+    await page.getByLabel('Email').fill(email);
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.getByLabel('6-digit code').fill(await latestCode(page, email));
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await page.waitForURL(complete('new_user-1'));
+  });
+
+  test('fresh=1 demands a passkey even when signed in', async ({ page }) => {
+    const device = await Device.add(page);
+    await signUp(page);
+    const before = await uses(device);
+    await page.goto('/signin?interaction=abc123&fresh=1');
+    await expect(page.getByRole('heading', { name: 'Confirm it’s you' })).toBeVisible();
+    await page.getByRole('button', { name: 'Sign in with passkey' }).click();
+    await page.waitForURL(complete('abc123'));
+    expect(await uses(device)).toBeGreaterThan(before); // the passkey was used
+  });
+
+  test('cancel returns a defined result', async ({ page }) => {
+    await page.goto('/signin?interaction=abc123');
+    await page.getByRole('button', { name: 'Cancel and go back to the app' }).click();
+    await page.waitForURL(/\/oidc\/interaction\/abc123\/abort\?reason=cancelled$/);
+  });
+
+  for (const bad of ['', 'https://evil.example', '..%2F..%2Fevil', 'a/b', '%2F%2Fevil.example', 'x'.repeat(129)]) {
+    test(`refuses to redirect for interaction=${JSON.stringify(bad.slice(0, 24))}`, async ({ page }) => {
+      await page.goto(`/signin?interaction=${bad}`);
+      await expect(page.getByRole('heading', { name: 'This sign-in link doesn’t work' })).toBeVisible();
+      await page.waitForTimeout(300);
+      expect(new URL(page.url()).pathname).toBe('/signin');
+    });
+  }
 });
 
 test('no secret ever leaves the device or lands in storage (D6)', async ({ page }) => {
