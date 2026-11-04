@@ -107,9 +107,20 @@ const BUCKET_LABELS: Record<string, string> = {
 };
 
 /** Private balance from the Railgun wallet (Sepolia testnet). Shown only while unlocked. */
+/** How long a sync may show no progress before we say so and offer a retry. */
+const SYNC_STALL_MS = 45_000;
+
 function PrivateBalance() {
   const pw = usePrivateWallet();
   const [copied, setCopied] = useState(false);
+  const [stalled, setStalled] = useState(false);
+  // Any change in status or progress resets the stall timer.
+  useEffect(() => {
+    setStalled(false);
+    if (pw.status !== 'syncing') return;
+    const t = setTimeout(() => setStalled(true), SYNC_STALL_MS);
+    return () => clearTimeout(t);
+  }, [pw.status, pw.scanProgress]);
   if (pw.status === 'off') return null;
   const rows = Object.entries(pw.balances)
     .filter(([bucket]) => bucket !== 'Spent')
@@ -151,10 +162,21 @@ function PrivateBalance() {
           </div>
         </div>
       )}
-      {pw.status === 'syncing' && (
+      {pw.status === 'syncing' && !stalled && (
         <p className="muted small" role="status">
           Syncing… {Math.round(pw.scanProgress * 100)}%
         </p>
+      )}
+      {pw.status === 'syncing' && stalled && (
+        <div className="stack" role="status">
+          <p className="small">
+            Syncing is taking longer than usual (stuck at {Math.round(pw.scanProgress * 100)}%). One of the networks your
+            wallet reads from may be slow. Your funds aren’t affected.
+          </p>
+          <div>
+            <button onClick={() => (setStalled(false), privateWallet.refresh())}>Retry sync</button>
+          </div>
+        </div>
       )}
       {(pw.status === 'ready' || pw.status === 'syncing') &&
         (rows.length === 0 ? (
