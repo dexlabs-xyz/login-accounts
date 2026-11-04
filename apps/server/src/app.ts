@@ -16,6 +16,7 @@ import {
 } from '@simplewebauthn/server';
 import type { Config } from './config.ts';
 import type { DB } from './db.ts';
+import { registerKycRoutes, type KycDeps } from './kyc/routes.ts';
 
 const MINUTE = 60_000;
 const CHALLENGE_TTL = 5 * MINUTE;
@@ -53,6 +54,8 @@ interface Deps {
   db: DB;
   mailer: Mailer;
   outbox?: OutboxEmail[];
+  /** Sumsub sandbox KYC. null = not configured; the rest of Login works without it. */
+  kyc?: KycDeps | null;
   now?: () => number;
 }
 
@@ -122,7 +125,7 @@ function assertNoPrfOutput(response: { clientExtensionResults?: unknown }): void
   if (ext?.prf?.results !== undefined) throw new ApiError(400, 'prf-output-sent');
 }
 
-export function createApp({ config, db, mailer, outbox, now = Date.now }: Deps) {
+export function createApp({ config, db, mailer, outbox, kyc = null, now = Date.now }: Deps) {
   const app = new Hono();
   app.use('/api/*', bodyLimit({ maxSize: 64 * 1024 }));
 
@@ -572,6 +575,10 @@ export function createApp({ config, db, mailer, outbox, now = Date.now }: Deps) 
     db.prepare('DELETE FROM credentials WHERE id = ?').run(cred.id);
     return c.json({ ok: true, credentialId: cred.id });
   });
+
+  // ---------- KYC (docs/kyc-architecture.md) ----------
+
+  registerKycRoutes(app, { db, kyc, session, now });
 
   // ---------- development only ----------
 

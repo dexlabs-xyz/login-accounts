@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
+import { KycCard } from './Kyc.tsx';
 import {
   addPasskey,
   connectPasskey,
@@ -397,6 +398,8 @@ function Account({
         </div>
         {me.hasVault && !open && <p className="muted small">Unlock your wallet first so a new passkey can open it too.</p>}
       </section>
+
+      <KycCard />
 
       {signInOnly && (
         <section className="warning" role="alert" aria-label="Sign-in only passkey">
