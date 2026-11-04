@@ -20,8 +20,7 @@ test('unlocking opens a Railgun wallet: 0zk address', async ({ page }) => {
   await expect(card.locator('code.address')).toHaveText(/^0zk/, { timeout: 120_000 });
 });
 
-// Needs the Proof of Innocence node URL (Sepolia requires one before reading balances).
-test.fixme('synced (empty) balance on Sepolia', async ({ page }) => {
+test('synced (empty) balance on Sepolia', async ({ page }) => {
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
@@ -50,6 +49,8 @@ test('no secret leaves the device with Railgun running (D6)', async ({ page }) =
   await expect(page.getByRole('region', { name: /Private balance/ }).locator('code.address')).toHaveText(/^0zk/, {
     timeout: 120_000,
   });
-  await page.waitForTimeout(5_000); // let the worker make its network calls
+  // Let the worker sync, and prove its traffic was captured (otherwise the check proves nothing).
+  await expect.poll(() => leaks.hosts(), { timeout: 120_000 }).toContain('ethereum-sepolia-rpc.publicnode.com');
+  await page.waitForTimeout(5_000);
   await leaks.assertNoLeaks();
 });

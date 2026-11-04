@@ -7,10 +7,13 @@ import { DERIVED_KEY_LABELS, deriveKeyMaterial, type Bytes } from '@login/vault'
 import type { BalanceBucket, FromWorker } from './protocol.ts';
 
 /**
- * Railgun Proof of Innocence nodes. Empty until the team confirms the URL from
- * Railgun's docs; balances then show as pending POI and sends won't work yet.
+ * Railgun Proof of Innocence aggregator nodes, in priority order. Sepolia
+ * requires one before the SDK reads the chain. This is the public node run by
+ * the community, as given in Railgun's docs: a third party, so its responses
+ * are untrusted input, and it sees the user's IP and the blinded commitments
+ * the wallet asks about.
  */
-const POI_NODE_URLS: string[] = [];
+const POI_NODE_URLS: string[] = ['https://ppoi.fdi.network'];
 
 export interface PrivateWalletState {
   status: 'off' | 'starting' | 'syncing' | 'ready' | 'needs-poi' | 'error';
