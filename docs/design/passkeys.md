@@ -88,6 +88,13 @@ the gas to shield, so EIP-7702 delegation or a paymaster is the likely answer.
 **Decided (2026-11-04): a fresh deposit address for every deposit**, so deposits
 can't be linked to each other on-chain. They are numbered addresses derived from
 the same root secret, so they need no extra backup and the user never sees them.
+**Decided (2026-11-04): the testnet balance is test USDC on Sepolia.** Tidepool
+(the community testnet for NEAR Intents) appears to offer only USDC as an
+ERC-20 on Ethereum Sepolia, and Railgun can only hold Sepolia ERC-20s. Mainnet
+stays USDT, which NEAR Intents delivers on Ethereum. The app and the demo must
+say "testnet uses USDC". To confirm against Tidepool's live `/v0/tokens`; if it
+does list a Sepolia USDT, switch to it.
+
 **Decided (2026-11-04): gas for a fresh deposit address comes with the deposit.**
 Tidepool delivers a small amount of Sepolia ETH to the same fresh address
 alongside the token, so the address pays its own shielding gas. No Login-run
