@@ -22,6 +22,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # their own installation while running.
 RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
+# Chromium for the passkey browser tests (Chrome's virtual authenticator),
+# downloaded at build time so the runtime firewall needs no extra domains.
+# Keep the version in step with @playwright/test in package.json.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx -y playwright@1.64.1 install --with-deps chromium \
+  && chmod -R a+rX /ms-playwright \
+  && rm -rf /var/lib/apt/lists/*
+
 # Folders for each agent's login/config, owned by the normal user.
 # Docker volumes mounted here keep logins across rebuilds.
 RUN mkdir -p /workspace /home/node/.claude /home/node/.codex /commandhistory \

@@ -1,0 +1,208 @@
+/**
+ * Passkey edge cases. Each test names the design decision it checks
+ * (docs/design/passkeys.md).
+ */
+import { expect, test } from '@playwright/test';
+import { Device, disableAutofill, freshEmail, recordSecrets, signOut, signUp, verifyEmail, walletCheck } from './helpers.ts';
+
+// Chrome's virtual authenticator answers autofill requests instantly, which a
+// real user never does. Keep autofill off except where a test turns it on.
+test.beforeEach(async ({ page }) => {
+  await disableAutofill(page);
+});
+
+test.describe('sign-up', () => {
+  test('happy path: synced passkey with PRF creates and opens a wallet (D1, D3)', async ({ page }) => {
+    await Device.add(page, { prf: true, synced: true });
+    await signUp(page);
+    await expect(page.getByText('Unlocked')).toBeVisible();
+    await expect(page.getByText('Synced passkey')).toBeVisible();
+    await expect(page.getByText('You could lose access')).toHaveCount(0);
+  });
+
+  test('device-only passkey shows the lose-your-money warning (D4)', async ({ page }) => {
+    await Device.add(page, { prf: true, synced: false });
+    await signUp(page);
+    await expect(page.getByText('Device-only passkey')).toBeVisible();
+    await expect(page.getByRole('alert').filter({ hasText: 'You could lose access to your money' })).toBeVisible();
+  });
+
+  test('no PRF: account works for sign-in, wallet is clearly unavailable here (D7)', async ({ page }) => {
+    await Device.add(page, { prf: false });
+    await signUp(page);
+    await expect(page.getByText('this device can’t open your Login wallet')).toBeVisible();
+    await expect(page.getByText('No wallet yet.')).toBeVisible();
+  });
+
+  test('user cancels Face ID / fingerprint: nothing is created, clear message', async ({ page }) => {
+    const device = await Device.add(page);
+    await device.setUserVerified(false);
+    await verifyEmail(page, freshEmail());
+    await expect(page.getByRole('alert')).toContainText(/closed or timed out|couldn’t be checked/);
+    expect(await device.credentials()).toHaveLength(0);
+  });
+
+  test('email that already has an account is sent to passkey sign-in (D2)', async ({ page }) => {
+    await Device.add(page);
+    const email = await signUp(page);
+    await signOut(page);
+    await verifyEmail(page, email);
+    await expect(page.getByText('You already have an account. Sign in with your passkey.')).toBeVisible();
+  });
+
+  test('wrong email code shows tries left', async ({ page }) => {
+    await page.goto('/');
+    await page.getByLabel('Email').fill(freshEmail());
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.getByLabel('6-digit code').fill('000000');
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await expect(page.getByRole('alert')).toContainText(/tries left|isn’t right/);
+  });
+});
+
+test.describe('sign-in and unlock', () => {
+  test('sign out, sign back in: same wallet opens (D5)', async ({ page }) => {
+    await Device.add(page);
+    await signUp(page);
+    const before = await walletCheck(page);
+    await signOut(page);
+    await page.getByRole('button', { name: 'Sign in with passkey' }).click();
+    await expect(page.getByText('Unlocked')).toBeVisible();
+    expect(await walletCheck(page)).toBe(before);
+  });
+
+  test('refreshing the page locks the wallet; passkey unlocks it (D5)', async ({ page }) => {
+    await Device.add(page);
+    await signUp(page);
+    const before = await walletCheck(page);
+    await page.reload();
+    await expect(page.getByText('Locked')).toBeVisible();
+    await page.getByRole('button', { name: 'Unlock with passkey' }).click();
+    expect(await walletCheck(page)).toBe(before);
+  });
+
+  test('passkey deleted from the device: sign-in fails with a clear message', async ({ page }) => {
+    const device = await Device.add(page);
+    await signUp(page);
+    await signOut(page);
+    await device.forgetAll();
+    await page.getByRole('button', { name: 'Sign in with passkey' }).click();
+    await expect(page.getByRole('alert')).toContainText('closed or timed out');
+  });
+});
+
+test('returning user signs in from the email field autofill (D2)', async ({ page }) => {
+  await Device.add(page);
+  await signUp(page);
+  const before = await walletCheck(page);
+  await signOut(page);
+  // Turn autofill on for this tab: the passkey is offered in the email field.
+  await page.evaluate(() => sessionStorage.setItem('e2e-autofill', 'on'));
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Your account' })).toBeVisible();
+  await expect(page.getByText('Unlocked')).toBeVisible();
+  expect(await walletCheck(page)).toBe(before);
+});
+
+test.describe('multiple passkeys (D1, D4)', () => {
+  test('a second passkey on another device opens the same wallet on its own', async ({ page }) => {
+    const laptop = await Device.add(page, { synced: false });
+    await signUp(page);
+    const before = await walletCheck(page);
+    await expect(page.getByText('You could lose access')).toBeVisible();
+
+    // Add a synced phone passkey while the wallet is open.
+    await laptop.remove();
+    const phone = await Device.add(page, { synced: true });
+    await page.getByRole('button', { name: 'Add a passkey' }).click();
+    await expect(page.getByText('This passkey can now open your wallet on its own.')).toBeVisible();
+    await expect(page.getByText('You could lose access')).toHaveCount(0);
+    expect(await phone.credentials()).toHaveLength(1);
+
+    // Laptop is gone. The phone alone opens the same wallet.
+    await signOut(page);
+    await page.getByRole('button', { name: 'Sign in with passkey' }).click();
+    await expect(page.getByText('Unlocked')).toBeVisible();
+    expect(await walletCheck(page)).toBe(before);
+  });
+
+  test('cannot remove the only passkey that opens the wallet', async ({ page }) => {
+    const laptop = await Device.add(page);
+    await signUp(page);
+    await laptop.remove();
+    await Device.add(page, { prf: false }); // sign-in only passkey
+    await page.getByRole('button', { name: 'Add a passkey' }).click();
+    await page.getByRole('button', { name: 'Keep for signing in' }).click();
+
+    const walletRow = page.getByRole('listitem').filter({ hasText: 'opens wallet' });
+    await walletRow.getByRole('button', { name: 'Remove' }).click();
+    await expect(page.getByRole('alert')).toContainText('only passkey that can open your wallet');
+  });
+
+  test('a passkey whose storage has no PRF is explained, and can be kept or removed (Brave case)', async ({ page }) => {
+    const laptop = await Device.add(page);
+    await signUp(page);
+    await laptop.remove();
+    const brave = await Device.add(page, { prf: false, synced: false });
+    await page.getByRole('button', { name: 'Add a passkey' }).click();
+
+    const panel = page.getByRole('alert', { name: 'Sign-in only passkey' });
+    await expect(panel).toContainText('not a backup for your money');
+    await panel.getByRole('button', { name: 'Remove it' }).click();
+    await expect(page.getByText('Removed.')).toBeVisible();
+    await expect(page.getByRole('listitem')).toHaveCount(1);
+    expect(await brave.credentials()).toHaveLength(1); // still on the device; the server no longer accepts it
+
+    // Keep path: label says why, and there's no Connect button.
+    await page.getByRole('button', { name: 'Add a passkey' }).click();
+    await page.getByRole('button', { name: 'Keep for signing in' }).click();
+    const row = page.getByRole('listitem').filter({ hasText: 'can’t open wallets' });
+    await expect(row).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Connect' })).toHaveCount(0);
+  });
+
+  test('a passkey added while the wallet was locked can be connected later, then opens the wallet alone', async ({ page }) => {
+    const laptop = await Device.add(page);
+    await signUp(page);
+    const before = await walletCheck(page);
+    await page.getByRole('button', { name: 'Lock' }).click();
+
+    const phone = await Device.add(page, { synced: true, transport: 'usb' });
+    await laptop.setResponds(false); // the user registers on the phone
+    await page.getByRole('button', { name: 'Add a passkey' }).click();
+    await laptop.setResponds(true);
+    await expect(page.getByText('press “Connect” next to it')).toBeVisible();
+    const phoneRow = page.getByRole('listitem').filter({ hasText: 'not connected to your wallet yet' });
+    await expect(phoneRow.getByRole('button', { name: 'Connect' })).toBeDisabled();
+
+    // Unlock with the laptop (the passkey that opens the wallet)...
+    await phone.setResponds(false);
+    await page.getByRole('button', { name: 'Unlock with passkey' }).click();
+    await expect(page.getByText('Unlocked')).toBeVisible();
+    // ...then connect the phone, using the phone.
+    await laptop.setResponds(false);
+    await phone.setResponds(true);
+    await phoneRow.getByRole('button', { name: 'Connect' }).click();
+    await expect(page.getByText('This passkey can now open your wallet on its own.')).toBeVisible();
+
+    // Laptop gone: the phone alone opens the same wallet.
+    await laptop.remove();
+    await page.reload();
+    await page.getByRole('button', { name: 'Unlock with passkey' }).click();
+    await expect(page.getByText('Unlocked')).toBeVisible();
+    expect(await walletCheck(page)).toBe(before);
+    expect(await phone.credentials()).toHaveLength(1);
+  });
+});
+
+test('no secret ever leaves the device or lands in storage (D6)', async ({ page }) => {
+  const leaks = await recordSecrets(page);
+  await Device.add(page);
+  await signUp(page);
+  await signOut(page);
+  await page.getByRole('button', { name: 'Sign in with passkey' }).click();
+  await expect(page.getByText('Unlocked')).toBeVisible();
+  await page.getByRole('button', { name: 'Confirm a test send' }).click();
+  await expect(page.getByText('Confirmed with your passkey')).toBeVisible();
+  await leaks.assertNoLeaks();
+});
