@@ -88,18 +88,17 @@ the gas to shield, so EIP-7702 delegation or a paymaster is the likely answer.
 **Decided (2026-11-04): a fresh deposit address for every deposit**, so deposits
 can't be linked to each other on-chain. They are numbered addresses derived from
 the same root secret, so they need no extra backup and the user never sees them.
-**Decided (2026-11-04): the testnet balance is test USDC on Sepolia.** Tidepool
-(the community testnet for NEAR Intents) appears to offer only USDC as an
-ERC-20 on Ethereum Sepolia, and Railgun can only hold Sepolia ERC-20s. Mainnet
-stays USDT, which NEAR Intents delivers on Ethereum. The app and the demo must
-say "testnet uses USDC". To confirm against Tidepool's live `/v0/tokens`; if it
-does list a Sepolia USDT, switch to it.
+**Testnet balance: Tidepool's test USDT on Sepolia** (checked 2026-11-04 against
+Tidepool's live `/v0/tokens`; an earlier reading of its examples wrongly
+suggested only USDC). Matches the team rule (USDT), so no rule change needed.
 
 **Decided (2026-11-04): gas for a fresh deposit address comes with the deposit.**
-Tidepool delivers a small amount of Sepolia ETH to the same fresh address
+NEAR Intents delivers a small amount of native ETH to the same fresh address
 alongside the token, so the address pays its own shielding gas. No Login-run
 gas sponsor (it would see every deposit address and its timing). Cost: a second
-swap fee per deposit.
+swap fee per deposit. **Open for testnet:** Tidepool can't deliver native
+Sepolia ETH (its ETH exists only on the NEAR side), so this works on mainnet
+but not yet on Sepolia.
 
 ## Verifying external contracts
 
@@ -135,6 +134,16 @@ check and record:
 - **Fit:** built for unshield / cross-contract calls run by broadcasters and
   shielding the base token (ETH). It does **not**, as shipped in the SDK, let a
   fresh address shield an ERC-20 without someone paying its gas.
+
+### Tidepool test USDT (Sepolia `0x650F12bA31777DE8Ded47287a8CC86bE737646fe`), checked 2026-11-04
+
+- "Tidepool Testnet USDT (no value)", 6 decimals, ~2.6 KB, not a proxy.
+- Has an owner (`0x55F2c8044D790e1b8369508c31c756c0c2Ca0E93`) and `mint`;
+  minting by anyone else reverts ("not minter"). Tidepool controls supply via
+  its faucet. No transfer fee, blacklist or pause functions found.
+- Not yet compared against published source (explorers unreachable from our tools).
+- Tidepool itself is community-run and testnet-only (not affiliated with
+  NEAR); its responses are untrusted input.
 
 ## Open flags (don't lose these)
 
