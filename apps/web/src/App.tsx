@@ -398,7 +398,8 @@ function Account({
         {me.hasVault && !open && <p className="muted small">Unlock your wallet first so a new passkey can open it too.</p>}
       </section>
 
-      {signInOnly && (
+      {/* Only while that passkey still exists: it may have been removed from the list instead. */}
+      {signInOnly && me.credentials.some((c) => c.id === signInOnly) && (
         <section className="warning" role="alert" aria-label="Sign-in only passkey">
           <p>
             <strong>This passkey can sign you in, but it can’t open your wallet.</strong> The place it’s stored (for example, this

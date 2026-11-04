@@ -162,6 +162,21 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await expect(row.getByRole('button', { name: 'Connect' })).toHaveCount(0);
   });
 
+  test('removing the sign-in-only passkey from the list also closes its keep/remove panel', async ({ page }) => {
+    const laptop = await Device.add(page);
+    await signUp(page);
+    await laptop.remove();
+    await Device.add(page, { prf: false, synced: false });
+    await page.getByRole('button', { name: 'Other options' }).click();
+    const panel = page.getByRole('alert', { name: 'Sign-in only passkey' });
+    await expect(panel).toBeVisible();
+
+    await page.getByRole('listitem').filter({ hasText: 'can’t open wallets' }).getByRole('button', { name: 'Remove' }).click();
+    await expect(page.getByRole('listitem')).toHaveCount(1);
+    await expect(panel).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0); // no stale error either
+  });
+
   test('a passkey added while the wallet was locked can be connected later, then opens the wallet alone', async ({ page }) => {
     const laptop = await Device.add(page);
     await signUp(page);
