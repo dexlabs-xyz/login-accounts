@@ -3,6 +3,7 @@
  * Owned jointly by the passkeys and OIDC teams; changes need both to review.
  *
  *   /api/*                    passkeys (passkeys/routes.ts)
+ *   /api/testnet-gas          TESTNET-ONLY gas faucet (testnet-gas/), contradicts D6
  *   /oidc/*, /.well-known/*   OIDC provider (oidc/, mounted here by the OIDC team)
  */
 import { Hono } from 'hono';
@@ -13,6 +14,7 @@ import { ApiError } from './http.ts';
 import type { Mailer, OutboxEmail } from './mail.ts';
 import { passkeyRoutes } from './passkeys/routes.ts';
 import { createSessions } from './passkeys/session.ts';
+import { testnetGasRoutes, type GasSender } from './testnet-gas/routes.ts';
 
 export interface AppDeps {
   config: Config;
@@ -20,6 +22,8 @@ export interface AppDeps {
   mailer: Mailer;
   outbox?: OutboxEmail[];
   now?: () => number;
+  /** TESTNET-ONLY gas faucet (contradicts D6; never on mainnet). Null = off. */
+  gasSender?: GasSender | null;
 }
 
 export function createApp(deps: AppDeps) {
@@ -36,6 +40,7 @@ export function createApp(deps: AppDeps) {
   });
 
   app.route('/', passkeyRoutes({ ...deps, sessions, now }));
+  app.route('/', testnetGasRoutes({ sessions, sender: deps.gasSender ?? null, now }));
 
   // OIDC: mount the provider here, e.g. app.route('/', oidcRoutes({ ...deps, getSignedInUser: sessions.getSignedInUser })).
 

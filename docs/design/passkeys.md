@@ -100,6 +100,31 @@ swap fee per deposit. **Open for testnet:** Tidepool can't deliver native
 Sepolia ETH (its ETH exists only on the NEAR side), so this works on mainnet
 but not yet on Sepolia.
 
+## Testnet-only exceptions (must NOT reach mainnet)
+
+### Login testnet gas faucet: contradicts D6
+
+**Decided 2026-11-05 (team lead).** Tidepool can't deliver native Sepolia ETH, so
+on testnet a fresh deposit address has no gas to shield its USDT. For the
+hackathon only, a small Login server endpoint sends a little Sepolia ETH to the
+fresh address just before a deposit.
+
+**Why it contradicts D6:** Login's server sees each deposit address and when it
+was requested, by a signed-in user. That is exactly the identity-to-wallet link
+D6 says the server must never have. On-chain, every Login deposit address is also
+funded by the same faucet address, which marks it as a Login deposit.
+
+**Limits while it exists:**
+- Refuses to run on any chain except Sepolia (checks the RPC's chain ID on every send).
+- Off unless its key is configured; the key is testnet-only and lives only in `.env`.
+- Stores nothing: no database rows, no logs of addresses, no analytics. Rate
+  limits are in memory and keyed by user ID only.
+- Labelled as a testnet simulation in code, README and the demo.
+
+**Mainnet design (unchanged):** NEAR Intents delivers a little native ETH to the
+same fresh address alongside the token. No Login gas sponsor. Delete this
+faucet before any mainnet work.
+
 ## Verifying external contracts
 
 Using established contracts doesn't mean trusting them blindly. Before Login

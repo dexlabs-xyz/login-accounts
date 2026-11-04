@@ -386,14 +386,17 @@ function SignInHandoff() {
   const valid = INTERACTION_ID.test(interaction);
   const [state, setState] = useState<'checking' | 'sign-in' | 'leaving'>('checking');
 
-  const complete = useCallback(() => {
+  // Leave exactly once: a second redirect would cancel the first (React runs
+  // effects twice in development, and callbacks can race).
+  const left = useRef(false);
+  const leave = useCallback((path: string) => {
+    if (left.current) return;
+    left.current = true;
     setState('leaving');
-    location.assign(`/oidc/interaction/${interaction}/complete`);
-  }, [interaction]);
-  const cancel = () => {
-    setState('leaving');
-    location.assign(`/oidc/interaction/${interaction}/abort?reason=cancelled`);
-  };
+    location.assign(path);
+  }, []);
+  const complete = useCallback(() => leave(`/oidc/interaction/${interaction}/complete`), [leave, interaction]);
+  const cancel = () => leave(`/oidc/interaction/${interaction}/abort?reason=cancelled`);
 
   useEffect(() => {
     if (!valid) return;

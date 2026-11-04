@@ -16,6 +16,15 @@ npm run dev
 Passkeys work on `localhost` without HTTPS. Use Chrome, Safari or Firefox on the
 same machine.
 
+### Testnet gas faucet (simulation)
+
+Sepolia only. Sends a little test ETH to a fresh deposit address so it can pay
+to shield its test USDT, because Tidepool can't deliver Sepolia ETH. It
+**contradicts our privacy design (D6)** and must never reach mainnet: see
+[Testnet-only exceptions](docs/design/passkeys.md#testnet-only-exceptions-must-not-reach-mainnet).
+Off by default; set `TESTNET_GAS_FAUCET_KEY` in `.env` to a fresh, testnet-only
+key funded with Sepolia ETH (optionally `SEPOLIA_RPC_URL`).
+
 ## Tests
 
 ```bash
@@ -31,6 +40,7 @@ npm run typecheck
   - `src/passkeys/` — email codes, passkey sign-up/sign-in, sessions, encrypted vault storage (passkeys team)
   - `src/oidc/` — OpenID Connect provider (Login infra team). Contract: [`src/oidc/README.md`](apps/server/src/oidc/README.md)
   - `src/migrations/` — numbered database migrations; each team owns its tables
+  - `src/testnet-gas/` — **testnet-only** gas faucet (simulation; contradicts D6, never on mainnet)
   - `src/app.ts`, `main.ts`, `config.ts`, `db.ts`, `http.ts`, `mail.ts` — shared; changes need both teams' review
 - `apps/web` — the withlogin.com app
 - `e2e` — browser tests
