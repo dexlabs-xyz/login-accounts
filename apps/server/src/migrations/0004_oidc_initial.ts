@@ -1,9 +1,10 @@
 import type { Migration } from './index.ts';
 
-export const m0003: Migration = {
-  id: '0003_oidc_initial',
+export const m0004: Migration = {
+  id: '0004_oidc_initial',
   owner: 'oidc',
-  up(db) { db.exec(`
+  up(db) {
+    db.exec(`
 -- Component-owned migration; no passkey tables are changed.
 CREATE TABLE IF NOT EXISTS oidc_records (
   model TEXT NOT NULL,
@@ -19,5 +20,6 @@ CREATE TABLE IF NOT EXISTS oidc_subjects (
   subject TEXT NOT NULL UNIQUE,
   PRIMARY KEY (account_id, client_id)
 );
-`); },
+`);
+  },
 };

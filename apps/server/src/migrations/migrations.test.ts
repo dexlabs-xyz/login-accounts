@@ -8,7 +8,7 @@ const tables = (db: DatabaseSync) =>
 describe('migrations', () => {
   it('builds a fresh database and records each migration once', () => {
     const db = new DatabaseSync(':memory:');
-    expect(migrate(db)).toEqual(['0001_passkeys_initial', '0002_passkeys_prf_supported', '0003_oidc_initial']);
+    expect(migrate(db)).toEqual(['0001_passkeys_initial', '0002_passkeys_prf_supported', '0004_oidc_initial']);
     expect(migrate(db)).toEqual([]); // second run does nothing
     expect(tables(db)).toEqual(expect.arrayContaining(['users', 'credentials', 'vaults', 'sessions', 'schema_migrations']));
   });

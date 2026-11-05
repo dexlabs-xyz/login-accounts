@@ -13,6 +13,7 @@ import type { DB } from './db.ts';
 import { ApiError } from './http.ts';
 import type { Mailer, OutboxEmail } from './mail.ts';
 import { passkeyRoutes } from './passkeys/routes.ts';
+import type { GetKycClaims } from './oidc/contracts.ts';
 import { oidcRoutes } from './oidc/routes.ts';
 import { createSessions } from './passkeys/session.ts';
 import { testnetGasRoutes, type GasSender } from './testnet-gas/routes.ts';
@@ -27,6 +28,8 @@ export interface AppDeps {
   gasSender?: GasSender | null;
   /** Explicit opt-in for the localhost-only OIDC iteration. */
   oidcIssuer?: string;
+  /** Adapter supplied by the KYC component when PR #4 and OIDC are combined. */
+  getKycClaims?: GetKycClaims;
 }
 
 export function createApp(deps: AppDeps) {
@@ -49,7 +52,7 @@ export function createApp(deps: AppDeps) {
     ? process.env.OIDC_ISSUER ?? 'http://localhost:5180/oidc' : undefined);
   if (oidcIssuer) {
     if (deps.config.rpId !== 'localhost') throw new Error('Local OIDC requires the localhost passkey configuration.');
-    app.route('/', oidcRoutes({ db: deps.db, sessions, issuer: oidcIssuer }));
+    app.route('/', oidcRoutes({ db: deps.db, sessions, issuer: oidcIssuer, getKycClaims: deps.getKycClaims }));
   }
 
   return { app, sessions };

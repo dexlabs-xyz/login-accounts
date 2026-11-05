@@ -11,12 +11,15 @@ export interface SignedInUser {
 }
 export type GetSignedInUser = (request: IncomingMessage) => Promise<SignedInUser | null>;
 
-/** Owned by KYC. Never return identity documents or provider reference IDs here. */
-export interface Verification {
-  status: 'approved' | 'pending' | 'rejected' | 'none';
-  level?: string;
-  provider: 'sumsub';
-  sandbox: boolean;
-  checkedAt: number;
+/** Matches KYC's kycClaims(level, approvedScopes) output. Never include PII or provider IDs. */
+export interface KycClaims {
+  verified_human?: true;
+  kyc_level?: 'L1' | 'L2' | 'L3';
+  /** The adapter adds this when an approved result came from the sandbox. */
+  verification_sandbox?: true;
 }
-export type GetVerification = (userId: string) => Promise<Verification | null>;
+/** KYC owns the level lookup and kycClaims call. OIDC supplies only granted scopes. */
+export type GetKycClaims = (
+  userId: string,
+  approvedScopes: readonly string[],
+) => Promise<KycClaims>;
