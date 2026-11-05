@@ -33,10 +33,13 @@ try {
  await page.getByRole('heading',{name:'Signed in to the chess demo'}).waitFor();
  assert.ok(first===await page.locator('code').textContent());
  await page.getByRole('link',{name:'Try another flow'}).click();
+ // Hold the virtual device until the fresh-check screen is observable.
+ await device.setResponds(false);
  const checksBeforeFresh=passkeyChecks;
  await page.getByRole('link',{name:'Require a fresh sign-in'}).click();
  await page.getByRole('heading',{name:'Confirm it’s you'}).waitFor();
- // Chrome's virtual authenticator completes the conditional passkey prompt automatically.
+ // Release the pending conditional prompt; a real WebAuthn verification must occur.
+ await device.setResponds(true);
  await page.getByRole('heading',{name:'Signed in to the chess demo'}).waitFor();
  assert.ok(passkeyChecks>checksBeforeFresh);
  // Real logout must invalidate the shared session used by OIDC.
