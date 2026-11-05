@@ -13,6 +13,7 @@ import type { DB } from './db.ts';
 import { ApiError } from './http.ts';
 import type { Mailer, OutboxEmail } from './mail.ts';
 import { passkeyRoutes } from './passkeys/routes.ts';
+import { oidcRoutes } from './oidc/routes.ts';
 import { createSessions } from './passkeys/session.ts';
 import { testnetGasRoutes, type GasSender } from './testnet-gas/routes.ts';
 
@@ -24,6 +25,8 @@ export interface AppDeps {
   now?: () => number;
   /** TESTNET-ONLY gas faucet (contradicts D6; never on mainnet). Null = off. */
   gasSender?: GasSender | null;
+  /** Explicit opt-in for the localhost-only OIDC iteration. */
+  oidcIssuer?: string;
 }
 
 export function createApp(deps: AppDeps) {
@@ -42,7 +45,12 @@ export function createApp(deps: AppDeps) {
   app.route('/', passkeyRoutes({ ...deps, sessions, now }));
   app.route('/', testnetGasRoutes({ sessions, sender: deps.gasSender ?? null, now }));
 
-  // OIDC: mount the provider here, e.g. app.route('/', oidcRoutes({ ...deps, getSignedInUser: sessions.getSignedInUser })).
+  const oidcIssuer = deps.oidcIssuer ?? (process.env.OIDC_ENABLED === '1'
+    ? process.env.OIDC_ISSUER ?? 'http://localhost:5180/oidc' : undefined);
+  if (oidcIssuer) {
+    if (deps.config.rpId !== 'localhost') throw new Error('Local OIDC requires the localhost passkey configuration.');
+    app.route('/', oidcRoutes({ db: deps.db, sessions, issuer: oidcIssuer }));
+  }
 
   return { app, sessions };
 }

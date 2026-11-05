@@ -63,3 +63,81 @@ Add migrations as `../migrations/NNNN_oidc_<what>.ts` and list them in
   Development signing keys are generated locally and never committed.
 - Bind dev servers to `127.0.0.1`: inside the container `localhost` is IPv6-only,
   and VS Code's port forwarding connects over IPv4.
+
+## Integrated local iteration (OIDC team)
+
+The provider is now mounted at the marked location in `app.ts`, through
+`oidc/routes.ts`. The Node/Hono bridge lets `oidc-provider` handle its native
+request and response without another API server. It passes the Cookie header to
+`sessions.getSignedInUser` and converts the returned milliseconds to OIDC seconds,
+retaining millisecond precision to enforce a genuinely newer check for fresh sign-in.
+The OIDC module never reads passkey session tables or cookie values directly.
+
+From the repository root, on Node 22.13+:
+
+```sh
+npm ci
+npm run dev:oidc
+```
+
+This starts the shared API on 127.0.0.1:8787, Vite on localhost:5180 and the demo
+client on localhost:5190. Stop other dev servers using these ports first. Forward
+5180 and 5190 to the same local port numbers if using a remote container. Open
+http://localhost:5190 and choose **Continue with Login**. This iteration now uses
+**the real passkey routes**, not the old simulated sign-in button.
+
+For a new account, use a test email; the code appears at
+http://localhost:5180/dev/outbox (development only). Create a passkey when asked,
+then allow consent. Returning users can sign in with a passkey. A passkey that
+cannot open the wallet still works for OIDC. KYC is not connected, so
+`verified_human` defaults to false. Do not use real identity documents or funds.
+
+`npm run dev` remains the passkey-only workflow unless `OIDC_ENABLED=1` is set.
+The integration explicitly opts in with that variable. `OIDC_ISSUER` defaults to
+`http://localhost:5180/oidc`; the `/oidc` suffix is required. Discovery is at
+`/oidc/.well-known/openid-configuration`; the root discovery path redirects there.
+Endpoint URLs use the configured public issuer, even when Vite rewrites Host to
+the internal API address. Forwarded headers are not trusted as issuer settings.
+
+The local demo uses approved `openid-client` to validate discovery, state, nonce,
+PKCE, ID-token signature/issuer/audience/expiry and UserInfo subject. It discards
+tokens after use and displays only the per-app ID and verification status. Its
+result expires after ten minutes. It requires `OIDC_DEV_CLIENT=1` and a localhost
+HTTP issuer; the npm script supplies the flag. No provider, cookie keys, request
+bodies, tokens or private signing material are logged.
+
+### Storage and limitations
+
+Migration `0003_oidc_initial` is registered in the shared migration registry. It
+creates only `oidc_records` and `oidc_subjects`; passkey migrations and tables are
+unchanged. SQLite contains protocol sessions, grants, authorization codes and
+access tokens; keep the development database private. Per-app IDs persist in the
+shared database across restarts. OIDC signing and cookie keys are ephemeral in
+this iteration, so restarting the API requires a new OIDC flow. Passkey sessions
+and credentials follow the passkey component's existing storage behavior.
+
+Local-only and unaudited: production issuers are refused. Production signing-key
+management, client registration administration, grant revocation UI and abuse
+controls remain future work. Only the `openid` scope is supported: email, name,
+wallet data and identity documents are not sent to apps. Approved sandbox KYC,
+when connected by its owner, must carry `verification_sandbox: true`.
+
+### Validation
+
+```sh
+npm run typecheck
+npm test
+# With npm run dev:oidc running, and Playwright Chromium installed:
+npm run test:oidc:browser
+```
+
+For a system Chromium set `OIDC_CHROMIUM_EXECUTABLE` to its executable path. The
+browser test uses Chrome virtual passkeys without PRF wallet support. It checks
+signup, token-validated OIDC sign-in, per-app IDs, consent reuse, a fresh real
+WebAuthn verification, logout and cancellation. It does not create a wallet or
+contact chain services. Protocol tests additionally cover PKCE failure, replay,
+expiry, Origin checks, browser-bound interactions and verification claims.
+
+Shared review surface: `app.ts`, migration registration and its expectation test,
+workspace manifests and the root lockfile. `main.ts`, `config.ts`, `db.ts`, Vite
+configuration, passkey code and the web application are unchanged by this work.
