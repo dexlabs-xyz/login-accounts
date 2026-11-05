@@ -11,10 +11,21 @@ test('Railgun broadcasters on Sepolia', async ({ page }) => {
   page.on('console', (m) => /error/i.test(m.type()) && console.log('[console]', m.text().slice(0, 300)));
   page.context().on('requestfailed', (r) => console.log('[failed]', new URL(r.url()).host, r.failure()?.errorText));
   await page.goto('/');
-  // Runs in the browser, where Vite serves the source file at this path.
-  const result = await page.evaluate(async (path) => {
-    const mod = (await import(/* @vite-ignore */ path)) as { checkBroadcasters: (ms: number) => Promise<unknown> };
-    return mod.checkBroadcasters(120_000);
-  }, '/src/dev/broadcaster-check.ts');
+  // Runs in the browser, where Vite serves the source file at this path. The
+  // first import can make Vite prepare new libraries and reload the page
+  // (development only), so retry once after that.
+  const run = () =>
+    page.evaluate(async (path) => {
+      const mod = (await import(/* @vite-ignore */ path)) as { checkBroadcasters: (ms: number) => Promise<unknown> };
+      return mod.checkBroadcasters(120_000);
+    }, '/src/dev/broadcaster-check.ts');
+  let result: unknown;
+  try {
+    result = await run();
+  } catch {
+    await page.waitForLoadState('load');
+    await page.waitForTimeout(3_000);
+    result = await run();
+  }
   console.log('[broadcasters]', JSON.stringify(result, null, 2));
 });
