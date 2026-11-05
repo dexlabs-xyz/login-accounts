@@ -102,6 +102,12 @@ never an empty one, because the password manager hides anything left out.
   - Verified end to end on live Sepolia + Tidepool (e2e/deposit.spec.ts):
     1 USDC on Ethereum Sepolia arrives as 0.99 private USDT in about 2.5 minutes,
     with the leak test covering deposit keys and all third-party traffic.
+  - Direct deposits for USDT already on Sepolia (no swap; the user's wallet is
+    visibly the funder on-chain, which the screen says).
+  - Proof of Innocence results are fetched on unlock, on Retry and every minute
+    while funds are pending (the SDK doesn't do it by itself). Confirmed
+    manually 2026-11-05: a deposit from the team lead's own wallet went from
+    "being checked" to **Spendable** (4.97 USDT from 5 USDC).
 
 ### Smart accounts
 
