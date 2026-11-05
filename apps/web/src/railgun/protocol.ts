@@ -24,6 +24,8 @@ export interface DepositQuote {
   minUsdt: string;
   deadline: string; // ISO time
   refundTo: string;
+  /** No swap: the user sends USDT on Sepolia straight to the fresh address. */
+  direct?: boolean;
 }
 
 export interface DepositRecord {

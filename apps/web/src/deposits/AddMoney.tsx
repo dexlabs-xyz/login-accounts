@@ -36,6 +36,8 @@ function stageText(stage: Stage | undefined, record: DepositRecord): string {
     }[stage.swap];
   }
   switch (stage?.kind) {
+    case 'waiting-direct':
+      return 'Waiting for your USDT to arrive at your deposit address…';
     case 'arriving':
       return 'USDT arriving at your deposit address…';
     case 'adding-gas':
@@ -136,6 +138,7 @@ export function AddMoney() {
               {tokens.origins.map((t) => (
                 <option key={t.assetId} value={t.assetId}>
                   {t.symbol} on {CHAIN_NAMES[t.blockchain as OriginChain]}
+                  {t.assetId === tokens.usdt.assetId ? ' (direct, no swap)' : ''}
                 </option>
               ))}
             </select>
@@ -174,11 +177,23 @@ export function AddMoney() {
               Copy
             </button>
           </div>
+          {active.record.quote?.direct && (
+            <p className="small muted">
+              Direct deposit: no swap, so this skips NEAR Intents. On-chain, your wallet will be visible as the sender to
+              this deposit address. To hide it, deposit a different token so the swap sends it instead.
+            </p>
+          )}
           <p className="small">
             You’ll receive about <strong>{formatUnits(afterShield(active.quote.amountOut) ?? active.quote.amountOut, USDT_DECIMALS)} USDT</strong>{' '}
             privately (at least {formatUnits(afterShield(active.quote.minAmountOut) ?? active.quote.minAmountOut, USDT_DECIMALS)}).
-            {shieldFeeBp !== null && ` Includes Tidepool’s rate and Railgun’s ${shieldFeeBp / 100}% fee for entering the private pool.`}{' '}
-            Gas is covered on testnet. Quote valid until {new Date(active.quote.deadline).toLocaleTimeString()}.
+            {shieldFeeBp !== null &&
+              (active.record.quote?.direct
+                ? ` Includes Railgun’s ${shieldFeeBp / 100}% fee for entering the private pool.`
+                : ` Includes Tidepool’s rate and Railgun’s ${shieldFeeBp / 100}% fee for entering the private pool.`)}{' '}
+            Gas is covered on testnet.{' '}
+            {active.record.quote?.direct
+              ? 'This address stays open for 24 hours.'
+              : `Quote valid until ${new Date(active.quote.deadline).toLocaleTimeString()}.`}
           </p>
           <p role="status" className="info" data-testid="active-deposit-status">
             {stageText(depositProgress.get(active.record.index), active.record)}

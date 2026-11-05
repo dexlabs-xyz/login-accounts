@@ -10,7 +10,7 @@
 import { api } from '../api.ts';
 import { privateWallet } from '../railgun/client.ts';
 import type { DepositRecord } from '../railgun/protocol.ts';
-import { getQuote, getStatus, isFinal, type SwapStatus, type Token } from './tidepool.ts';
+import { formatUnits, getQuote, getStatus, isFinal, type Quote, type SwapStatus, type Token } from './tidepool.ts';
 
 /** Enough Sepolia ETH for approve + shield. Below this we ask the testnet faucet. */
 const MIN_GAS_WEI = 1_500_000_000_000_000n;
@@ -21,6 +21,7 @@ const QUOTE_GRACE_MS = 10 * 60_000;
 /** Live, non-secret progress per deposit, for the UI. */
 export type Stage =
   | { kind: 'waiting-payment'; swap: SwapStatus }
+  | { kind: 'waiting-direct' }
   | { kind: 'arriving' }
   | { kind: 'adding-gas' }
   | { kind: 'shielding' }
@@ -54,6 +55,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Step 1: reserve a fresh address and get a quote for it. */
 export async function startDeposit(p: { origin: Token; usdt: Token; amount: string; solanaRefund?: string }) {
   const record = await privateWallet.call<DepositRecord>('deposit.next');
+  if (p.origin.assetId === p.usdt.assetId) return startDirect(record, p.amount);
   // EVM origins: refunds go to the same fresh address on the origin chain (same key, user-controlled).
   const refundTo = p.origin.blockchain === 'sol' ? p.solanaRefund! : record.address;
   const quote = await getQuote({ origin: p.origin, usdt: p.usdt, amount: p.amount, recipient: record.address, refundTo });
@@ -76,12 +78,64 @@ export async function startDeposit(p: { origin: Token; usdt: Token; amount: stri
   return { record: updated, quote };
 }
 
+/**
+ * Already holding Sepolia USDT: nothing to swap. The user sends it straight to
+ * the fresh address. On-chain, their wallet is then visibly the funder of the
+ * deposit address (with a swap, Tidepool's address is), which our rules accept.
+ */
+async function startDirect(record: DepositRecord, amount: string) {
+  const deadline = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+  const amountInFormatted = formatUnits(amount, 6, 6);
+  const updated = await privateWallet.call<DepositRecord>('deposit.update', {
+    index: record.index,
+    status: 'awaiting-delivery',
+    quote: {
+      tidepoolDepositAddress: record.address,
+      originChain: 'eth',
+      originSymbol: 'USDT',
+      amountIn: amount,
+      amountInFormatted,
+      expectedUsdt: amount,
+      minUsdt: amount,
+      deadline,
+      refundTo: '',
+      direct: true,
+    },
+  });
+  void track(updated);
+  const quote: Quote = {
+    depositAddress: record.address,
+    amountIn: amount,
+    amountInFormatted,
+    amountOut: amount,
+    minAmountOut: amount,
+    deadline,
+    timeEstimate: 30,
+  };
+  return { record: updated, quote };
+}
+
 /** Steps 2–4: follow a deposit to the end. Safe to call again; one run per deposit. */
 export async function track(record: DepositRecord): Promise<void> {
   if (running.has(record.index)) return;
   running.add(record.index);
   try {
-    if (record.status === 'awaiting-delivery' && record.quote) {
+    if (record.status === 'awaiting-delivery' && record.quote?.direct) {
+      // Direct: wait for USDT to land at the fresh address itself.
+      setStage(record.index, { kind: 'waiting-direct' });
+      for (;;) {
+        const bal = await privateWallet.call<{ usdt: string }>('deposit.balances', { index: record.index });
+        if (BigInt(bal.usdt) > 0n) break;
+        if (Date.now() > Date.parse(record.quote.deadline)) {
+          await privateWallet.call('deposit.update', { index: record.index, status: 'failed' });
+          setStage(record.index, { kind: 'failed', reason: 'No USDT arrived within a day. Start a new deposit when you’re ready.' });
+          return;
+        }
+        await sleep(POLL_MS);
+      }
+      await privateWallet.call('deposit.update', { index: record.index, status: 'delivered' });
+      record = { ...record, status: 'delivered' };
+    } else if (record.status === 'awaiting-delivery' && record.quote) {
       let swap: SwapStatus = 'PENDING_DEPOSIT';
       for (;;) {
         swap = await getStatus(record.quote.tidepoolDepositAddress).catch(() => swap);
