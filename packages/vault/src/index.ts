@@ -183,6 +183,8 @@ export function closeVault(open: OpenVault | null): void {
 export const DERIVED_KEY_LABELS = {
   /** Encrypts the Railgun SDK's local wallet database (IndexedDB) on this device. */
   railgunDbKey: 'withlogin.com/derive/railgun-db-key/v1',
+  /** Encrypts this device's deposit records (which fresh addresses are in use). */
+  depositRecordsKey: 'withlogin.com/derive/deposit-records-key/v1',
 } as const;
 
 const DERIVE_SALT = new TextEncoder().encode('withlogin.com/derive/hkdf/v1');
@@ -200,6 +202,44 @@ export async function deriveKeyMaterial(
   const ikm = await subtle().importKey('raw', rootSecret, 'HKDF', false, ['deriveBits']);
   const bits = await subtle().deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: DERIVE_SALT, info: enc(label) }, ikm, 256);
   return new Uint8Array(bits);
+}
+
+/** Encrypted JSON for local storage, bound to a purpose by AAD. */
+export interface SealedJson {
+  v: number;
+  iv: string;
+  ct: string;
+}
+
+async function aesKey(raw: Bytes): Promise<CryptoKey> {
+  if (raw.byteLength !== 32) throw new Error('Key must be 32 bytes.');
+  return subtle().importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+/** Encrypt a JSON value with a 32-byte key (AES-GCM). `purpose` must match on open. */
+export async function sealJson(key: Bytes, purpose: string, value: unknown): Promise<SealedJson> {
+  const iv = randomBytes(IV_BYTES);
+  const ct = await subtle().encrypt(
+    { name: 'AES-GCM', iv, additionalData: enc(`withlogin.com/sealed/v1/${purpose}`) },
+    await aesKey(key),
+    enc(JSON.stringify(value)),
+  );
+  return { v: 1, iv: b64u(iv), ct: b64u(new Uint8Array(ct)) };
+}
+
+/** Decrypt a value from sealJson. Fails closed on a wrong key, purpose or tampering. */
+export async function openJson<T>(key: Bytes, purpose: string, sealed: SealedJson): Promise<T> {
+  if (sealed.v !== 1) throw new VaultError('unsupported-version', 'Unknown sealed format.');
+  try {
+    const plain = await subtle().decrypt(
+      { name: 'AES-GCM', iv: fromB64u(sealed.iv), additionalData: enc(`withlogin.com/sealed/v1/${purpose}`) },
+      await aesKey(key),
+      fromB64u(sealed.ct),
+    );
+    return JSON.parse(new TextDecoder().decode(plain)) as T;
+  } catch {
+    throw new VaultError('decrypt-failed', 'Could not open stored data.');
+  }
 }
 
 export function b64u(bytes: Uint8Array): string {

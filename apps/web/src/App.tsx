@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
 import { privateWallet } from './railgun/client.ts';
+import { SEPOLIA_USDT, USDT_DECIMALS } from './railgun/protocol.ts';
+import { AddMoney } from './deposits/AddMoney.tsx';
+import { formatUnits } from './deposits/tidepool.ts';
 import {
   addPasskey,
   connectPasskey,
@@ -185,9 +188,14 @@ function PrivateBalance() {
           <ul className="passkeys">
             {rows.map((r) => (
               <li key={r.bucket + r.tokenAddress}>
-                <code>{r.tokenAddress.slice(0, 8)}…</code>
-                <span>
-                  {r.amount} <span className="muted small">({BUCKET_LABELS[r.bucket] ?? r.bucket})</span>
+                {r.tokenAddress.toLowerCase() === SEPOLIA_USDT.toLowerCase() ? (
+                  <strong>USDT</strong>
+                ) : (
+                  <code>{r.tokenAddress.slice(0, 8)}…</code>
+                )}
+                <span data-testid={`balance-${r.bucket}`}>
+                  {r.tokenAddress.toLowerCase() === SEPOLIA_USDT.toLowerCase() ? formatUnits(r.amount, USDT_DECIMALS) : r.amount}{' '}
+                  <span className="muted small">({BUCKET_LABELS[r.bucket] ?? r.bucket})</span>
                 </span>
               </li>
             ))}
@@ -525,6 +533,7 @@ function Account({
       </section>
 
       {me.hasVault && open && <PrivateBalance />}
+      {me.hasVault && open && <AddMoney />}
 
       {atRisk && (
         <section className="warning" role="alert">

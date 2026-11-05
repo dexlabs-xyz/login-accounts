@@ -93,6 +93,15 @@ never an empty one, because the password manager hides anything left out.
   sending chain; Solana refunds to the Solana wallet the user sends from.
 - **Sending chains for the hackathon:** Ethereum, Base and Arbitrum Sepolia,
   plus Solana devnet.
+- **Built 2026-11-05** (`apps/web/src/deposits/`, `railgun/deposits.ts`). Details:
+  - Approves exactly the deposit amount to Railgun, never an unlimited allowance.
+  - Every Tidepool response is checked: the destination must be our verified
+    USDT contract, the quote must echo our recipient, token and refund address,
+    and amounts and addresses must be well-formed.
+  - Quotes never paid expire 10 minutes after their deadline.
+  - Verified end to end on live Sepolia + Tidepool (e2e/deposit.spec.ts):
+    1 USDC on Ethereum Sepolia arrives as 0.99 private USDT in about 2.5 minutes,
+    with the leak test covering deposit keys and all third-party traffic.
 
 ### Smart accounts
 

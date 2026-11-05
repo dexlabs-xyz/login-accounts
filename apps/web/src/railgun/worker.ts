@@ -31,6 +31,7 @@ import {
 import { NETWORK_CONFIG, NetworkName, type RailgunBalancesEvent } from '@railgun-community/shared-models';
 import { Mnemonic } from 'ethers';
 import { DERIVED_KEY_LABELS, deriveKeyMaterial } from '@login/vault';
+import { createDeposits } from './deposits.ts';
 import type { FromWorker, ToWorker } from './protocol.ts';
 
 const NETWORK = NetworkName.EthereumSepolia;
@@ -40,6 +41,12 @@ const WALLET_SOURCE = 'loginaccounts'; // shown on-chain as the shield source; l
 
 const post = (m: FromWorker) => self.postMessage(m);
 let walletId: string | null = null;
+let deposits: ReturnType<typeof createDeposits> | null = null;
+let shieldFeeBasisPoints: string | null = null;
+
+const errorDetail = (err: unknown) =>
+  // Development only, to debug the SDK. Never in production builds.
+  import.meta.env.DEV && err instanceof Error ? `${err.message}\n${err.stack ?? ''}`.slice(0, 1500) : undefined;
 
 // ---------- circuit artifacts, cached in IndexedDB (public files, not secret) ----------
 
@@ -111,35 +118,74 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
       // BIP-39: the 32-byte root secret is the entropy of a 24-word phrase (never shown).
       const mnemonic = Mnemonic.fromEntropy(rootSecret).phrase;
       const dbKey = await deriveKeyMaterial(rootSecret, DERIVED_KEY_LABELS.railgunDbKey);
+      const recordsKey = await deriveKeyMaterial(rootSecret, DERIVED_KEY_LABELS.depositRecordsKey);
       rootSecret.fill(0);
       const dbKeyHex = Array.from(dbKey, (x) => x.toString(16).padStart(2, '0')).join('');
       dbKey.fill(0);
       const info = await createRailgunWallet(dbKeyHex, mnemonic, undefined);
       walletId = info.id;
       post({ type: 'opened', railgunAddress: info.railgunAddress });
+      // The phrase and records key stay in this worker's memory for deposits; gone when it terminates.
+      deposits = createDeposits({
+        mnemonic,
+        recordsKey,
+        railgunAddress: info.railgunAddress,
+        rpcUrl: SEPOLIA_RPC,
+        onChange: (records) => post({ type: 'deposits', records }),
+      });
+      post({ type: 'deposits', records: await deposits.list() });
 
       // Sepolia requires a Proof of Innocence node before the SDK will read the chain.
       if (msg.poiNodeURLs.length === 0) {
         post({ type: 'needs-poi' });
         return;
       }
-      await loadProvider(
+      const { feesSerialized } = await loadProvider(
         { chainId: CHAIN.id, providers: [{ provider: SEPOLIA_RPC, priority: 1, weight: 2, maxLogsPerBatch: 10 }] },
         NETWORK,
         15_000,
       );
+      shieldFeeBasisPoints = feesSerialized.shieldFeeV2;
       // Starts this wallet's balance scan (loading the provider alone doesn't).
       await refreshBalances(CHAIN, [info.id]);
     } else if (msg.type === 'refresh' && walletId) {
       await refreshBalances(CHAIN, [walletId]);
+    } else if (msg.type === 'call') {
+      try {
+        if (!deposits) throw new Error('Wallet not open.');
+        const value = await (async () => {
+          switch (msg.method) {
+            case 'deposit.next':
+              return deposits.next();
+            case 'deposit.list':
+              return deposits.list();
+            case 'deposit.update':
+              return deposits.update(msg.params);
+            case 'deposit.balances':
+              return deposits.balances(msg.params);
+            case 'deposit.shield': {
+              const r = await deposits.shield(msg.params);
+              if (walletId) void refreshBalances(CHAIN, [walletId]);
+              return r;
+            }
+            case 'deposit.rescan':
+              return deposits.rescan();
+            case 'fees':
+              return { shieldFeeBasisPoints };
+          }
+        })();
+        post({ type: 'result', id: msg.id, ok: true, value });
+      } catch (err) {
+        post({ type: 'result', id: msg.id, ok: false, error: err instanceof Error ? err.name : 'Error', detail: errorDetail(err) });
+      }
+      return;
     }
   } catch (err) {
     // Only a generic description: never the SDK's message, which could include wallet details.
     post({
       type: 'error',
       message: err instanceof Error ? err.name : 'Error',
-      // Development only, to debug the SDK. Never in production builds.
-      detail: import.meta.env.DEV && err instanceof Error ? `${err.message}\n${err.stack ?? ''}`.slice(0, 1500) : undefined,
+      detail: errorDetail(err),
     });
   }
 };

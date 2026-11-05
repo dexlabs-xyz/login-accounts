@@ -4,7 +4,7 @@
  * which wipes the page's copy, and the worker derives both.
  */
 import type { Bytes } from '@login/vault';
-import type { BalanceBucket, FromWorker } from './protocol.ts';
+import type { BalanceBucket, DepositMethod, DepositRecord, FromWorker } from './protocol.ts';
 
 /**
  * Railgun Proof of Innocence aggregator nodes, in priority order. Sepolia
@@ -22,9 +22,20 @@ export interface PrivateWalletState {
   /** Balances by bucket. Amounts in the token's smallest unit, as strings. */
   balances: Partial<Record<BalanceBucket, { tokenAddress: string; amount: string }[]>>;
   error: string | null;
+  /** This device's deposit records (decrypted inside the worker). */
+  deposits: DepositRecord[];
 }
 
-const initial: PrivateWalletState = { status: 'off', railgunAddress: null, scanProgress: 0, balances: {}, error: null };
+const initial: PrivateWalletState = {
+  status: 'off',
+  railgunAddress: null,
+  scanProgress: 0,
+  balances: {},
+  error: null,
+  deposits: [],
+};
+let nextCallId = 1;
+const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 let state: PrivateWalletState = initial;
 let worker: Worker | null = null;
 const listeners = new Set<() => void>();
@@ -54,6 +65,16 @@ export const privateWallet = {
       else if (m.type === 'scan')
         set({ scanProgress: m.progress, status: m.status === 'Complete' ? 'ready' : state.status === 'off' ? 'off' : 'syncing' });
       else if (m.type === 'balances') set({ balances: { ...state.balances, [m.bucket]: m.erc20 } });
+      else if (m.type === 'deposits') set({ deposits: m.records });
+      else if (m.type === 'result') {
+        const p = pending.get(m.id);
+        pending.delete(m.id);
+        if (m.ok) p?.resolve(m.value);
+        else {
+          if (import.meta.env.DEV && m.detail) console.error('[railgun worker]', m.detail);
+          p?.reject(new Error(m.error));
+        }
+      }
       else if (m.type === 'error') {
         if (import.meta.env.DEV && m.detail) console.error('[railgun worker]', m.detail);
         set({ status: 'error', error: m.message });
@@ -74,10 +95,23 @@ export const privateWallet = {
     worker?.postMessage({ type: 'refresh' });
   },
 
+  /** Ask the worker to do something with deposits. Rejects if the wallet is locked. */
+  call<T>(method: DepositMethod, params?: unknown): Promise<T> {
+    if (!worker) return Promise.reject(new Error('Wallet locked.'));
+    const id = nextCallId++;
+    const w = worker;
+    return new Promise<T>((resolve, reject) => {
+      pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      w.postMessage({ type: 'call', id, method, params });
+    });
+  },
+
   /** Lock: terminating the worker drops every key it held. */
   stop() {
     worker?.terminate();
     worker = null;
+    for (const p of pending.values()) p.reject(new Error('Wallet locked.'));
+    pending.clear();
     if (state.status !== 'off') set(initial);
   },
 };
