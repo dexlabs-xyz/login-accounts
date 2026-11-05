@@ -55,6 +55,26 @@ with the server's full list, so removed passkeys stop being offered by the
 password manager. It is only ever called with the complete list from the server,
 never an empty one, because the password manager hides anything left out.
 
+### Railgun wallet (first milestone)
+
+- **Recovery phrase:** the 32-byte root secret is the BIP-39 entropy of a
+  24-word phrase (`ethers` `Mnemonic.fromEntropy`). Never shown by default.
+- **Local database key:** `deriveKeyMaterial(rootSecret, "withlogin.com/derive/railgun-db-key/v1")`
+  (HKDF-SHA256). Encrypts the Railgun SDK's IndexedDB data on this device.
+  Every derived key has its own label; labels are never reused or edited.
+- **Isolation:** the SDK runs only in a Web Worker (`apps/web/src/railgun/`).
+  It can't read the page, the session or passkey ceremonies. Locking
+  terminates the worker. The main app bundle doesn't include the SDK.
+- **Network, directly from the browser (never via Login's server):** Sepolia
+  RPC (publicnode), quick sync (rail-squid), artifacts and POI list
+  (ipfs-lb.com), and a POI node. They all see the user's IP address; the RPC
+  provider also sees which public addresses are queried.
+- **Proof of Innocence is required on Sepolia even to read balances.** Until a
+  POI node URL is configured (`POI_NODE_URLS` in `railgun/client.ts`), the app
+  shows the Railgun address but not the balance.
+- `web3` 1.x (pulled in by Railgun's proof library) is **not** in the browser
+  bundle; it is install-time only. Install scripts are disabled (`.npmrc`).
+
 ### Smart accounts
 
 The private balance sits in Railgun and is controlled by Railgun keys, not a
@@ -68,7 +88,46 @@ the gas to shield, so EIP-7702 delegation or a paymaster is the likely answer.
 **Decided (2026-11-04): a fresh deposit address for every deposit**, so deposits
 can't be linked to each other on-chain. They are numbered addresses derived from
 the same root secret, so they need no extra backup and the user never sees them.
-Gas for shielding from them gets designed together with the deposit route.
+**Decided (2026-11-04): gas for a fresh deposit address comes with the deposit.**
+Tidepool delivers a small amount of Sepolia ETH to the same fresh address
+alongside the token, so the address pays its own shielding gas. No Login-run
+gas sponsor (it would see every deposit address and its timing). Cost: a second
+swap fee per deposit.
+
+## Verifying external contracts
+
+Using established contracts doesn't mean trusting them blindly. Before Login
+integrates any contract (Railgun, account delegates, token contracts, bridges),
+check and record:
+
+1. **Source:** the deployed bytecode matches published source at a known commit
+   (explorer verification, or our own compile-and-compare).
+2. **Audits:** which audits cover *this* contract and version.
+3. **Control:** owner/admin roles, upgradeability (proxy slots), pause,
+   `selfdestruct`, initializers that could be front-run.
+4. **Authority:** exactly what it can do with user funds or a delegated account,
+   and what must be signed for that (chain ID, nonce, expiry, malleability).
+5. **Fit with our rules:** privacy (what it reveals, to whom), no Login master
+   keys, no Login-run funds handling, testnet-only.
+
+### Railgun RelayAdapt7702 (Sepolia `0x05ae73c5925d843864ae6F261f3175De2ebCd963`), checked 2026-11-04
+
+- **Control:** not a proxy (EIP-1967 implementation/admin/beacon slots empty),
+  ~11 KB of real code. No owner, no upgrade, no `selfdestruct`, no initializer.
+- **Authority:** `execute`/`multicall` need a signature from the delegated
+  account itself (OpenZeppelin ECDSA, EIP-712 domain with chain ID and account
+  address) and a sequential nonce; every other function is self-only.
+- **SDK side:** signs 7702 authorizations with the explicit chain ID (never 0)
+  and the contract address pinned in Railgun's network config; a validator
+  rejects mismatches.
+- **Gaps:** source is only on an **unmerged feature branch**
+  (`Railgun-Privacy/contract` `zy0n/7702-relay-adapt`, last commit 2026-05-07);
+  **no audit found**; bytecode not yet compared to that source; signed actions
+  have **no expiry**; nonce lives in storage slot 0 (fine for fresh accounts,
+  can collide with a previous delegation).
+- **Fit:** built for unshield / cross-contract calls run by broadcasters and
+  shielding the base token (ETH). It does **not**, as shipped in the SDK, let a
+  fresh address shield an ERC-20 without someone paying its gas.
 
 ## Open flags (don't lose these)
 

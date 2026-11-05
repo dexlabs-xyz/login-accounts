@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closeVault, createVault, openVault, wrapForPasskey, VaultError } from './index.ts';
+import { closeVault, createVault, deriveKeyMaterial, DERIVED_KEY_LABELS, openVault, wrapForPasskey, VaultError } from './index.ts';
 
 // Stand-ins for what two different passkeys' PRF extension would return.
 const prfA = () => new Uint8Array(32).fill(1);
@@ -82,5 +82,34 @@ describe('vault', () => {
     const { open } = await createVault(prfA(), USER, CRED_A);
     closeVault(open);
     expect(open.rootSecret.every((b) => b === 0)).toBe(true);
+  });
+});
+
+describe('deriveKeyMaterial', () => {
+  const root = () => new Uint8Array(32).fill(7);
+
+  it('is deterministic: same secret and label, same key (so the Railgun DB opens on every unlock)', async () => {
+    const a = await deriveKeyMaterial(root(), DERIVED_KEY_LABELS.railgunDbKey);
+    const b = await deriveKeyMaterial(root(), DERIVED_KEY_LABELS.railgunDbKey);
+    expect(a).toEqual(b);
+    expect(a.byteLength).toBe(32);
+  });
+
+  it('differs from the root secret and between users', async () => {
+    const a = await deriveKeyMaterial(root(), DERIVED_KEY_LABELS.railgunDbKey);
+    const other = await deriveKeyMaterial(new Uint8Array(32).fill(8), DERIVED_KEY_LABELS.railgunDbKey);
+    expect(a).not.toEqual(root());
+    expect(a).not.toEqual(other);
+  });
+
+  it('different labels give unrelated keys', async () => {
+    const a = await deriveKeyMaterial(root(), DERIVED_KEY_LABELS.railgunDbKey);
+    // @ts-expect-error: only known labels are allowed; this checks separation anyway
+    const b = await deriveKeyMaterial(root(), 'withlogin.com/derive/something-else/v1');
+    expect(a).not.toEqual(b);
+  });
+
+  it('refuses a root secret of the wrong size', async () => {
+    await expect(deriveKeyMaterial(new Uint8Array(16), DERIVED_KEY_LABELS.railgunDbKey)).rejects.toThrow();
   });
 });

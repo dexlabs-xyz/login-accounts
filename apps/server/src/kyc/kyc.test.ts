@@ -4,7 +4,8 @@
  */
 import { createHash, createHmac } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createApp, devOutboxMailer } from '../app.ts';
+import { createApp } from '../app.ts';
+import { devOutboxMailer } from '../mail.ts';
 import { loadConfig } from '../config.ts';
 import { openDb, type DB } from '../db.ts';
 import { loadKycConfig, type KycConfig } from './config.ts';
@@ -157,7 +158,7 @@ class FakeSumsub implements SumsubClient {
 
 let db: DB;
 let fake: FakeSumsub;
-let app: ReturnType<typeof createApp>;
+let app: ReturnType<typeof createApp>['app'];
 let kycConfig: KycConfig;
 
 function makeApp(webhookSecret: string | null, withKyc = true) {
@@ -172,7 +173,7 @@ function makeApp(webhookSecret: string | null, withKyc = true) {
     db,
     mailer: devOutboxMailer([]),
     kyc: withKyc ? { config: kycConfig, sumsub: fake } : null,
-  });
+  }).app;
 }
 
 /** A signed-in user, created directly in the database. */
@@ -390,7 +391,7 @@ describe('simulated review results (sandbox, localhost only)', () => {
     fake = new FakeSumsub();
     const config = loadConfig(env({ WEBAUTHN_RP_ID: 'withlogin.com', WEBAUTHN_ORIGINS: 'https://withlogin.com' }));
     const kycConfig = loadKycConfig(env({ SUMSUB_APP_TOKEN: 'sbx:t', SUMSUB_SECRET_KEY: 's', SUMSUB_WEBHOOK_SECRET: 'w' }), 'withlogin.com')!;
-    app = createApp({ config, db, mailer: devOutboxMailer([]), kyc: { config: kycConfig, sumsub: fake } });
+    app = createApp({ config, db, mailer: devOutboxMailer([]), kyc: { config: kycConfig, sumsub: fake } }).app;
     const cookie = signedIn();
     expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ simulate: false });
     expect((await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' })).status).toBe(404);
@@ -427,7 +428,7 @@ describe('enabled levels (SUMSUB_LEVELS)', () => {
     db = openDb(':memory:');
     fake = new FakeSumsub();
     const kycConfig = loadKycConfig(env({ SUMSUB_APP_TOKEN: 'sbx:t', SUMSUB_SECRET_KEY: 's', SUMSUB_LEVELS: 'L1' }), 'localhost')!;
-    app = createApp({ config: loadConfig(env({ DEV_OUTBOX: '1' })), db, mailer: devOutboxMailer([]), kyc: { config: kycConfig, sumsub: fake } });
+    app = createApp({ config: loadConfig(env({ DEV_OUTBOX: '1' })), db, mailer: devOutboxMailer([]), kyc: { config: kycConfig, sumsub: fake } }).app;
     const cookie = signedIn();
     expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ levels: ['L1'] });
     await call('POST', '/api/kyc/start', cookie, { level: 'L1' });

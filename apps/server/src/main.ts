@@ -1,9 +1,10 @@
 import { serve } from '@hono/node-server';
-import { createApp, devOutboxMailer, type Mailer, type OutboxEmail } from './app.ts';
+import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { openDb } from './db.ts';
 import { loadKycConfig } from './kyc/config.ts';
 import { createSumsubClient } from './kyc/sumsub.ts';
+import { devOutboxMailer, type Mailer, type OutboxEmail } from './mail.ts';
 
 const config = loadConfig();
 const outbox: OutboxEmail[] = [];
@@ -21,7 +22,7 @@ const kyc = kycConfig
   ? { config: kycConfig, sumsub: createSumsubClient({ appToken: kycConfig.appToken, secretKey: kycConfig.secretKey }) }
   : null;
 
-const app = createApp({ config, db: openDb(config.dbPath), mailer, outbox, kyc });
+const { app } = createApp({ config, db: openDb(config.dbPath), mailer, outbox, kyc });
 
 serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' }, ({ port }) => {
   console.log(`Login API on http://127.0.0.1:${port} (RP ID: ${config.rpId})`);

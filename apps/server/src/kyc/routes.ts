@@ -16,7 +16,7 @@
  * API and never logged. This is a simulation, not the real protection.
  */
 import { randomBytes } from 'node:crypto';
-import type { Context, Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { DB } from '../db.ts';
 import { LEVELS, type KycConfig, type Level } from './config.ts';
 import { higher, outcomeOf, rank, type AttemptState, type Reason } from './outcome.ts';
@@ -51,47 +51,25 @@ type StatusRow = {
 };
 type LinkRow = { user_id: string; external_user_id: string; applicant_id: string | null };
 
-export function migrateKyc(db: DB): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS kyc_status (
-      user_id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      level           TEXT,          -- highest level passed: 'L1' | 'L2' | 'L3', NULL = none
-      attempt_level   TEXT,          -- level of the latest attempt
-      attempt_state   TEXT,          -- 'in-progress' | 'in-review' | 'passed' | 'retry' | 'final'
-      attempt_reason  TEXT,          -- 'duplicate' | 'suspected-fraud' | 'selfie' | 'document' | 'other'
-      updated_at      INTEGER NOT NULL
-    );
-
-    -- SIMULATED CONTROLLED ACCESS (see the top of kyc/routes.ts). Never exposed or logged.
-    CREATE TABLE IF NOT EXISTS kyc_links (
-      user_id           TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      external_user_id  TEXT NOT NULL UNIQUE,   -- random; what Sumsub knows this account as
-      applicant_id      TEXT UNIQUE,            -- Sumsub's ID, learned from a webhook or the widget
-      created_at        INTEGER NOT NULL
-    );
-  `);
-}
-
 const fail = (c: Context, status: 400 | 403 | 404 | 409 | 502 | 503, error: string) => c.json({ error }, status);
 
-export function registerKycRoutes(
-  app: Hono,
-  {
-    db,
-    kyc,
-    session,
-    now,
-    localDev = false,
-  }: {
-    db: DB;
-    kyc: KycDeps | null;
-    session: (c: Context) => { user: { id: string } };
-    now: () => number;
-    /** True only when the RP ID is localhost. Turns on the simulated-review panel. */
-    localDev?: boolean;
-  },
-): void {
-  migrateKyc(db);
+/** KYC component, mounted by ../app.ts. Tables: migrations/0003_kyc_initial.ts. */
+export function kycRoutes({
+  db,
+  kyc,
+  session,
+  now,
+  localDev = false,
+}: {
+  db: DB;
+  kyc: KycDeps | null;
+  /** The signed-in account, or throws 401 (passkeys/session.ts). */
+  session: (c: Context) => { user: { id: string } };
+  now: () => number;
+  /** True only when the RP ID is localhost. Turns on the simulated-review panel. */
+  localDev?: boolean;
+}): Hono {
+  const app = new Hono();
 
   const statusOf = (userId: string) =>
     db.prepare('SELECT * FROM kyc_status WHERE user_id = ?').get(userId) as StatusRow | undefined;
@@ -301,4 +279,6 @@ export function registerKycRoutes(
     }
     return c.json({ ok: true });
   });
+
+  return app;
 }

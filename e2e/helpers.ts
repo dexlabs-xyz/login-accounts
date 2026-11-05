@@ -1,4 +1,6 @@
 import { expect, type CDPSession, type Page } from '@playwright/test';
+import { Mnemonic } from 'ethers';
+import { DERIVED_KEY_LABELS, deriveKeyMaterial } from '../packages/vault/src/index.ts';
 
 /**
  * Chrome's virtual authenticator: a software passkey device we fully control.
@@ -111,9 +113,12 @@ export async function signOut(page: Page) {
 
 /**
  * Records every secret the page handles, so tests can prove none of them ever
- * leaves the device: PRF outputs (from getClientExtensionResults) and the
- * plaintext the vault encrypts (the root secret). Test-only instrumentation;
- * the app itself exposes nothing.
+ * leaves the device: PRF outputs (from getClientExtensionResults), the
+ * plaintext the vault encrypts (the root secret), the root secret transferred to
+ * the Railgun worker, and the recovery phrase and Railgun DB key the worker
+ * derives from it (recomputed here). Checks every request, including
+ * the worker's, plus browser storage. Test-only instrumentation; the app
+ * itself exposes nothing.
  */
 export async function recordSecrets(page: Page) {
   await page.addInitScript(() => {
@@ -135,15 +140,34 @@ export async function recordSecrets(page: Page) {
       seen.push(hex(data as ArrayBuffer));
       return enc(alg, key, data);
     };
+    // The root secret as transferred to the Railgun worker (captured before the transfer empties it).
+    const post = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (this: Worker, msg: unknown, ...rest: unknown[]) {
+      const m = msg as { type?: string; rootSecret?: ArrayBuffer };
+      if (m?.type === 'open' && m.rootSecret) seen.push(hex(m.rootSecret));
+      return (post as (...a: unknown[]) => void).call(this, msg, ...rest);
+    } as typeof Worker.prototype.postMessage;
   });
   const sent: string[] = [];
-  page.on('request', (r) => {
+  const hosts = new Set<string>();
+  // Context-level, so requests made by Web Workers (the Railgun wallet) are included.
+  page.context().on('request', (r) => {
+    hosts.add(new URL(r.url()).hostname);
     sent.push(r.url() + '\n' + (r.postData() ?? '') + '\n' + JSON.stringify(r.headers()));
   });
   return {
+    /** Hostnames seen so far, to prove the recorder actually captured the traffic it checks. */
+    hosts: () => [...hosts],
     async assertNoLeaks() {
-      const secrets = await page.evaluate(() => (window as unknown as { __secrets: string[] }).__secrets);
+      const secrets = [...new Set(await page.evaluate(() => (window as unknown as { __secrets: string[] }).__secrets))];
       expect(secrets.length, 'test should have observed some secrets').toBeGreaterThan(0);
+      // The worker derives these from any 32-byte root secret; compute them here the same way.
+      const phrases: string[] = [];
+      for (const h of secrets.filter((x) => x.length === 64)) {
+        const root = new Uint8Array(Buffer.from(h, 'hex'));
+        phrases.push(Mnemonic.fromEntropy(root).phrase);
+        secrets.push(Buffer.from(await deriveKeyMaterial(root, DERIVED_KEY_LABELS.railgunDbKey)).toString('hex'));
+      }
       const stored = await page.evaluate(async () => ({
         local: JSON.stringify({ ...localStorage }),
         session: JSON.stringify({ ...sessionStorage }),
@@ -151,6 +175,14 @@ export async function recordSecrets(page: Page) {
         cookies: document.cookie,
       }));
       const haystack = sent.join('\n') + JSON.stringify(stored);
+      for (const phrase of phrases) {
+        const words = phrase.split(' ');
+        // The whole phrase, or any run of 4 consecutive words, in any request or storage.
+        for (let i = 0; i + 4 <= words.length; i++) {
+          const run = words.slice(i, i + 4);
+          expect(haystack.includes(run.join(' ')) || haystack.includes(run.join('%20')) || haystack.includes(run.join('+')), 'recovery phrase left the device').toBe(false);
+        }
+      }
       for (const h of secrets) {
         const bytes = Buffer.from(h, 'hex');
         for (const form of [h, bytes.toString('base64'), bytes.toString('base64url')]) {

@@ -36,6 +36,11 @@ OPTIONAL_DOMAINS=(
   "solver-relay-v2.chaindefuser.com"
   "bridge.chaindefuser.com"
   "api.sumsub.com"                # Sumsub KYC (use sandbox mode only)
+  "ethereum-sepolia-rpc.publicnode.com"  # Sepolia RPC (Railgun home chain, testnet)
+  "rail-squid.squids.live"        # Railgun quick-sync index
+  "ipfs-lb.com"                   # Railgun circuit artifacts + Proof of Innocence list
+  "ppoi.fdi.network"              # Railgun Proof of Innocence node (community-run, from Railgun docs)
+  "www.usetidepool.tech"          # Tidepool: community-run, testnet-only 1Click-compatible API for NEAR Intents
 )
 # ----------------------------------------------------------------------------
 
