@@ -40,7 +40,17 @@ test('A sends USDT privately to B through a broadcaster', async ({ page, browser
   const provider = new JsonRpcProvider(RPC);
   const funder = Wallet.createRandom().connect(provider); // throwaway, testnet only
   expect((await page.request.post('/api/testnet-gas', { data: { address: funder.address } })).ok()).toBe(true);
-  expect((await page.request.post(`${TIDEPOOL}/v0/faucet`, { data: { chain: 'eth', address: funder.address } })).ok()).toBe(true);
+  // Tidepool's faucet is community-run and sometimes refuses briefly: retry, logging why.
+  await expect
+    .poll(
+      async () => {
+        const r = await page.request.post(`${TIDEPOOL}/v0/faucet`, { data: { chain: 'eth', address: funder.address } });
+        if (!r.ok()) log(`Tidepool faucet ${r.status()}: ${(await r.text()).slice(0, 200)}`);
+        return r.ok();
+      },
+      { timeout: 10 * 60_000, intervals: [30_000] },
+    )
+    .toBe(true);
   const usdt = new Contract(SEPOLIA_USDT, ERC20, funder);
   await expect.poll(async () => (await provider.getBalance(funder.address)) > 0n, { timeout: 180_000, intervals: [5_000] }).toBe(true);
   await expect.poll(async () => ((await usdt.balanceOf!(funder.address)) as bigint) >= parseUnits('2', 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
@@ -55,8 +65,21 @@ test('A sends USDT privately to B through a broadcaster', async ({ page, browser
 
   // Spendable once the privacy checks clear (USDT to send, ETH for the fee).
   const t0 = Date.now();
-  // Railgun holds new shields as pending for a while before Proof of Innocence clears them.
-  await expect(cardA.getByTestId('balance-Spendable-usdt')).toBeVisible({ timeout: 90 * 60_000 });
+  // Measured on Sepolia, 5 Nov 2026: fresh shields took 52 and 74 minutes to clear.
+  // The wallet locks after 15 minutes idle (D5), so act like a user who's still here,
+  // and log each change to the balance card to measure how long the privacy check takes.
+  let lastCard = '';
+  await expect
+    .poll(
+      async () => {
+        await page.keyboard.press('Shift');
+        const t = (await cardA.innerText().catch(() => '')).replace(/\n+/g, ' | ');
+        if (t !== lastCard) log(`+${Math.round((Date.now() - t0) / 1000)}s card: ${(lastCard = t).slice(-200)}`);
+        return cardA.getByTestId('balance-Spendable-usdt').isVisible();
+      },
+      { timeout: 90 * 60_000, intervals: [30_000] },
+    )
+    .toBe(true);
   await expect(cardA.getByTestId('balance-Spendable-eth')).toBeVisible({ timeout: 10 * 60_000 });
   log(`A spendable after ${Math.round((Date.now() - t0) / 1000)}s: ${(await cardA.innerText()).replace(/\n+/g, ' | ').slice(-160)}`);
 
@@ -75,7 +98,7 @@ test('A sends USDT privately to B through a broadcaster', async ({ page, browser
   await send.getByLabel('To (private 0zk address)').fill(addressB);
   await send.getByLabel('Amount (USDT)').fill('0.5');
   await send.getByRole('button', { name: 'Review' }).click();
-  await expect(send.getByText(/Network fee: .* ETH/)).toBeVisible({ timeout: 120_000 });
+  await expect(send.getByText(/Network fee: [<\d].* ETH/)).toBeVisible({ timeout: 120_000 });
   log(`review: ${(await send.innerText()).replace(/\n+/g, ' | ').slice(0, 300)}`);
   await send.getByRole('button', { name: 'Confirm with passkey' }).click();
   await watch(page, 'send-status', /^Sent /, 10 * 60_000);

@@ -19,6 +19,7 @@ import {
 import {
   calculateGasPrice,
   EVMGasType,
+  getEVMGasTypeForTransaction,
   NETWORK_CONFIG,
   NetworkName,
   TXIDVersion,
@@ -98,13 +99,13 @@ export function createSender(ctx: SendContext) {
 
       const broadcaster = await bestBroadcaster();
       const feeTokenDetails = { tokenAddress: SEPOLIA_WETH, feePerUnitGas: BigInt(broadcaster.tokenFee.feePerUnitGas) };
+      // Broadcaster transactions on Ethereum must be Type 1 (a single gas price): the
+      // broadcaster batches them with a minimum gas price. The SDK picks the type.
       const fd = await provider.getFeeData();
-      const original: TransactionGasDetails = {
-        evmGasType: EVMGasType.Type2,
-        gasEstimate: 0n,
-        maxFeePerGas: fd.maxFeePerGas ?? 0n,
-        maxPriorityFeePerGas: fd.maxPriorityFeePerGas ?? 0n,
-      };
+      const evmGasType = getEVMGasTypeForTransaction(NETWORK, false);
+      if (evmGasType !== EVMGasType.Type0 && evmGasType !== EVMGasType.Type1) throw new Error(`Unexpected gas type ${evmGasType}`);
+      const original: TransactionGasDetails = { evmGasType, gasEstimate: 0n, gasPrice: fd.gasPrice ?? fd.maxFeePerGas ?? 0n };
+      if (calculateGasPrice(original) <= 0n) throw new SendError('no-broadcaster');
       const { gasEstimate } = await gasEstimateForUnprovenTransfer(
         V2,
         NETWORK,
@@ -119,6 +120,7 @@ export function createSender(ctx: SendContext) {
       );
       const gasDetails = { ...original, gasEstimate } as TransactionGasDetails;
       const fee = calculateBroadcasterFeeERC20Amount(feeTokenDetails, gasDetails).amount;
+      if (fee <= 0n) throw new SendError('no-broadcaster'); // a zero fee would just be refused
       if (fee > MAX_FEE_WEI) throw new SendError('fee-too-high');
       if ((spendable.get(SEPOLIA_WETH.toLowerCase()) ?? 0n) < fee) throw new SendError('insufficient-fee-balance');
 

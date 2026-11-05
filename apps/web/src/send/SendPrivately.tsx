@@ -1,5 +1,5 @@
 /** "Send privately": USDT to another private (0zk) address. TESTNET ONLY. */
-import { useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 import { privateWallet } from '../railgun/client.ts';
 import { SEPOLIA_USDT, USDT_DECIMALS } from '../railgun/protocol.ts';
 import { formatUnits, toUnits } from '../deposits/tidepool.ts';
@@ -16,6 +16,8 @@ const ERRORS: Record<string, string> = {
   'quote-expired': 'The fee quote expired. Review the send again.',
   'Wallet locked.': 'Your wallet locked. Unlock and try again.',
 };
+/** Sepolia gas is nearly free, so show enough digits that a real fee never reads as 0. */
+const formatFee = (wei: string) => (BigInt(wei) < 1_000_000_000n ? '< 0.000000001' : formatUnits(wei, 18, 9));
 const explain = (e: unknown) => (e instanceof Error && ERRORS[e.message]) || 'The send didn’t go through. Nothing was sent.';
 
 type Step =
@@ -31,6 +33,8 @@ export function SendPrivately({ confirmWithPasskey }: { confirmWithPasskey: () =
   const [amount, setAmount] = useState('');
   const [step, setStep] = useState<Step>({ kind: 'form' });
   const [error, setError] = useState('');
+  // The SDK reports progress per proof stage, so it can restart at 0. Never show it going back.
+  const shownProgress = useRef(0);
 
   if (pw.status !== 'ready') return null;
   const spendableUsdt =
@@ -58,6 +62,7 @@ export function SendPrivately({ confirmWithPasskey }: { confirmWithPasskey: () =
     setError('');
     // D5: every send is confirmed with the passkey, after the summary.
     if (!(await confirmWithPasskey())) return;
+    shownProgress.current = 0;
     setStep({ kind: 'sending' });
     try {
       const { txHash } = await privateWallet.call<{ txHash: string }>('send.execute', { quoteId: s.quoteId });
@@ -112,7 +117,7 @@ export function SendPrivately({ confirmWithPasskey }: { confirmWithPasskey: () =
             </code>
           </p>
           <p className="small">
-            Network fee: <strong>{formatUnits(step.feeWei, 18, 6)} ETH</strong>, paid from your private ETH balance to the
+            Network fee: <strong>{formatFee(step.feeWei)} ETH</strong>, paid from your private ETH balance to the
             relay that submits it. Quote valid until {new Date(step.expiresAt).toLocaleTimeString()}.
           </p>
           <div className="row">
@@ -129,7 +134,7 @@ export function SendPrivately({ confirmWithPasskey }: { confirmWithPasskey: () =
       {step.kind === 'sending' && (
         <p role="status" className="info" data-testid="send-status">
           {pw.sendProgress === null || pw.sendProgress < 100
-            ? `Creating the privacy proof… ${Math.round(pw.sendProgress ?? 0)}% (this takes a little while)`
+            ? `Creating the privacy proof… ${Math.round((shownProgress.current = Math.max(shownProgress.current, pw.sendProgress ?? 0)))}% (this takes a little while)`
             : 'Submitting through the network relay…'}
         </p>
       )}

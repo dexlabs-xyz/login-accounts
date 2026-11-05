@@ -108,6 +108,17 @@ never an empty one, because the password manager hides anything left out.
     while funds are pending (the SDK doesn't do it by itself). Confirmed
     manually 2026-11-05: a deposit from the team lead's own wallet went from
     "being checked" to **Spendable** (4.97 USDT from 5 USDC).
+  - Measured clearing time for a fresh deposit on Sepolia: 52 and 74 minutes
+    (two runs, 2026-11-05). The screen says "up to about an hour and a half".
+    The wallet's 15-minute idle lock (D5) can fire while a user waits; the
+    balance catches up on the next unlock.
+  - Private send verified end to end 2026-11-05 (`e2e/send.spec.ts`): proof
+    in the browser, submitted by a Railgun broadcaster that paid the gas
+    (tx `0xaea9f7a3…b8738`, sent from the broadcaster's address, not the
+    user's). Broadcaster transactions on Ethereum must be gas Type 1; the SDK's
+    `getEVMGasTypeForTransaction` picks it. Railgun charges 0.25% to shield and
+    0.25% to unshield (read from the Sepolia contract); private sends pay only
+    the broadcaster's fee.
 
 ### Smart accounts
 
