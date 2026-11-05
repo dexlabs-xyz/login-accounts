@@ -11,16 +11,24 @@
  */
 import {
   gasEstimateForShield,
+  gasEstimateForShieldBaseToken,
   getShieldPrivateKeySignatureMessage,
   populateShield,
+  populateShieldBaseToken,
 } from '@railgun-community/wallet';
 import { EVMGasType, NETWORK_CONFIG, NetworkName, TXIDVersion } from '@railgun-community/shared-models';
 import { Contract, HDNodeWallet, JsonRpcProvider, keccak256, type Provider } from 'ethers';
 import { openJson, sealJson, type Bytes, type SealedJson } from '@login/vault';
-import { SEPOLIA_USDT, type DepositRecord, type DepositStatus } from './protocol.ts';
+import { SEPOLIA_USDT, SEPOLIA_WETH, type DepositRecord, type DepositStatus } from './protocol.ts';
 
 const NETWORK = NetworkName.EthereumSepolia;
 const RAILGUN_PROXY = NETWORK_CONFIG[NETWORK].proxyContract;
+// Must match Railgun's own config (checked at startup below).
+if (NETWORK_CONFIG[NETWORK].baseToken.wrappedAddress.toLowerCase() !== SEPOLIA_WETH.toLowerCase()) {
+  throw new Error('Railgun WETH address changed; update SEPOLIA_WETH.');
+}
+/** Don't bother shielding leftover ETH below this (0.0005 ETH). */
+const MIN_FEE_SHIELD_WEI = 500_000_000_000_000n;
 const ERC20 = [
   'function balanceOf(address) view returns (uint256)',
   'function allowance(address,address) view returns (uint256)',
@@ -97,6 +105,37 @@ export function createDeposits(ctx: DepositContext) {
     return nonce > 0 || eth > 0n || tokens > 0n;
   }
 
+  /** Shield (balance - gas for this transaction) of ETH as WETH. Returns the tx hash, or null if too little. */
+  async function shieldLeftoverEth(wallet: HDNodeWallet, shieldPrivateKey: string): Promise<string | null> {
+    const fees = await provider.getFeeData();
+    const maxFee = fees.maxFeePerGas ?? 0n;
+    const balance = await provider.getBalance(wallet.address);
+    const probe = { tokenAddress: SEPOLIA_WETH, amount: balance / 2n };
+    const { gasEstimate } = await gasEstimateForShieldBaseToken(
+      TXIDVersion.V2_PoseidonMerkle,
+      NETWORK,
+      ctx.railgunAddress,
+      shieldPrivateKey,
+      probe,
+      wallet.address,
+    );
+    // Keep a 30% margin on gas so the transaction can't fail for lack of funds.
+    const reserve = (gasEstimate * maxFee * 13n) / 10n;
+    const amount = balance - reserve;
+    if (amount < MIN_FEE_SHIELD_WEI) return null;
+    const { transaction } = await populateShieldBaseToken(
+      TXIDVersion.V2_PoseidonMerkle,
+      NETWORK,
+      ctx.railgunAddress,
+      shieldPrivateKey,
+      { tokenAddress: SEPOLIA_WETH, amount },
+      { evmGasType: EVMGasType.Type2, gasEstimate, maxFeePerGas: maxFee, maxPriorityFeePerGas: fees.maxPriorityFeePerGas ?? 0n },
+    );
+    const sent = await wallet.sendTransaction(transaction);
+    await sent.wait(1);
+    return sent.hash;
+  }
+
   return {
     list: load,
 
@@ -143,23 +182,29 @@ export function createDeposits(ctx: DepositContext) {
 
       const token = usdt.connect(wallet) as Contract;
       let approveTx: string | undefined;
-      if (((await token.allowance!(wallet.address, RAILGUN_PROXY)) as bigint) < amount) {
+      const allowance = async () => (await token.allowance!(wallet.address, RAILGUN_PROXY)) as bigint;
+      if ((await allowance()) < amount) {
         const tx = await token.approve!(RAILGUN_PROXY, amount);
         await tx.wait(1);
         approveTx = tx.hash as string;
+        // The public RPC balances requests across nodes; one may not have seen
+        // the approval yet. Wait until the allowance is visible before estimating.
+        for (let i = 0; (await allowance()) < amount; i++) {
+          if (i >= 30) throw new Error('Approval not visible yet.');
+          await new Promise((r) => setTimeout(r, 2_000));
+        }
       }
 
       // Railgun derives the shield's encryption key from a signature by the sending address.
       const shieldPrivateKey = keccak256(await wallet.signMessage(getShieldPrivateKeySignatureMessage()));
       const recipients = [{ tokenAddress: SEPOLIA_USDT, amount, recipientAddress: ctx.railgunAddress }];
-      const { gasEstimate } = await gasEstimateForShield(
-        TXIDVersion.V2_PoseidonMerkle,
-        NETWORK,
-        shieldPrivateKey,
-        recipients,
-        [],
-        wallet.address,
-      );
+      const estimate = () =>
+        gasEstimateForShield(TXIDVersion.V2_PoseidonMerkle, NETWORK, shieldPrivateKey, recipients, [], wallet.address);
+      // One retry: a lagging RPC node can still fail the first estimate.
+      const { gasEstimate } = await estimate().catch(async () => {
+        await new Promise((r) => setTimeout(r, 5_000));
+        return estimate();
+      });
       const fees = await provider.getFeeData();
       const { transaction } = await populateShield(TXIDVersion.V2_PoseidonMerkle, NETWORK, shieldPrivateKey, recipients, [], {
         evmGasType: EVMGasType.Type2,
@@ -169,7 +214,18 @@ export function createDeposits(ctx: DepositContext) {
       });
       const sent = await wallet.sendTransaction(transaction);
       await sent.wait(1);
-      return patch(index, { status: 'shielded', approveTx, shieldTx: sent.hash });
+      const done = await patch(index, { status: 'shielded', approveTx, shieldTx: sent.hash });
+
+      // Best effort: shield the address's leftover ETH as WETH, so the private
+      // balance can pay broadcaster fees for private sends (no public address
+      // ever pays for a send). A failure here doesn't affect the deposit.
+      try {
+        const feeShieldTx = await shieldLeftoverEth(wallet, shieldPrivateKey);
+        if (feeShieldTx) return patch(index, { feeShieldTx });
+      } catch {
+        // Leave the ETH where it is; the user's deposit is complete.
+      }
+      return done;
     },
 
     /** New device: rebuild records by checking derived addresses until GAP_LIMIT unused in a row. */

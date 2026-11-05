@@ -45,6 +45,12 @@ OPTIONAL_DOMAINS=(
   "relay-a.rootedinprivacy.com"   # Railgun broadcaster network: relays
   "relay-b.rootedinprivacy.com"
   "client-edge.rootedinprivacy.com"
+  "seed-a.rootedinprivacy.com"    # more Railgun broadcaster peers (reliability)
+  "seed-b.rootedinprivacy.com"
+  "support-1.rootedinprivacy.com"
+  "support-2.rootedinprivacy.com"
+  "support-3.rootedinprivacy.com"
+  "support-4.rootedinprivacy.com"
 )
 # ----------------------------------------------------------------------------
 

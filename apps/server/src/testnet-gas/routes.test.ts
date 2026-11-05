@@ -89,16 +89,16 @@ describe('testnet gas faucet (simulation, contradicts D6)', () => {
     expect(sent).toHaveLength(0);
   });
 
-  it('sends 0.002 Sepolia ETH and labels the response a simulation', async () => {
+  it('sends 0.004 Sepolia ETH and labels the response a simulation', async () => {
     const app = build(fakeSender());
     const res = await ask(app, await signIn(app), ADDR.toLowerCase());
-    expect(await res.json()).toEqual({ status: 'sent', txHash: '0xtxhash', amountWei: '2000000000000000', simulation: true });
-    expect(sent).toEqual([{ to: ADDR, amount: 2_000_000_000_000_000n }]);
+    expect(await res.json()).toEqual({ status: 'sent', txHash: '0xtxhash', amountWei: '4000000000000000', simulation: true });
+    expect(sent).toEqual([{ to: ADDR, amount: 4_000_000_000_000_000n }]);
   });
 
   it('does not send to an address that already has enough', async () => {
     const app = build(fakeSender());
-    balance = 2_000_000_000_000_000n;
+    balance = 4_000_000_000_000_000n;
     expect(await (await ask(app, await signIn(app))).json()).toEqual({ status: 'already-funded' });
     expect(sent).toHaveLength(0);
   });

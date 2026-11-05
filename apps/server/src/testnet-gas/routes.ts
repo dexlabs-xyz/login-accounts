@@ -35,7 +35,9 @@ export interface GasLimits {
 }
 
 export const DEFAULT_LIMITS: GasLimits = {
-  amountWei: 2_000_000_000_000_000n, // 0.002 Sepolia ETH: enough for an approve + shield
+  // 0.004 Sepolia ETH: approve + shield, with the rest shielded as WETH to pay
+  // broadcaster fees for private sends.
+  amountWei: 4_000_000_000_000_000n,
   perUserPerHour: 5,
   globalPerHour: 60,
 };

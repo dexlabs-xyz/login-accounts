@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
 import { privateWallet } from './railgun/client.ts';
-import { SEPOLIA_USDT, USDT_DECIMALS } from './railgun/protocol.ts';
+import { SEPOLIA_USDT, SEPOLIA_WETH, USDT_DECIMALS } from './railgun/protocol.ts';
 import { AddMoney } from './deposits/AddMoney.tsx';
 import { formatUnits } from './deposits/tidepool.ts';
 import {
@@ -110,6 +110,21 @@ const BUCKET_LABELS: Record<string, string> = {
 };
 
 /** Private balance from the Railgun wallet (Sepolia testnet). Shown only while unlocked. */
+/** Known tokens in the private balance. TESTNET addresses (Sepolia). */
+const KNOWN_TOKENS: Record<string, { key: string; label: string; decimals: number }> = {
+  [SEPOLIA_USDT.toLowerCase()]: { key: 'usdt', label: 'USDT', decimals: USDT_DECIMALS },
+  [SEPOLIA_WETH.toLowerCase()]: { key: 'eth', label: 'ETH (for network fees)', decimals: 18 },
+};
+const tokenKey = (address: string) => KNOWN_TOKENS[address.toLowerCase()]?.key ?? 'other';
+const tokenLabel = (address: string) => {
+  const t = KNOWN_TOKENS[address.toLowerCase()];
+  return t ? <strong>{t.label}</strong> : <code>{address.slice(0, 8)}…</code>;
+};
+const tokenAmount = (address: string, amount: string) => {
+  const t = KNOWN_TOKENS[address.toLowerCase()];
+  return t ? formatUnits(amount, t.decimals, t.decimals === 18 ? 5 : 2) : amount;
+};
+
 /** How long a sync may show no progress before we say so and offer a retry. */
 const SYNC_STALL_MS = 45_000;
 
@@ -188,13 +203,9 @@ function PrivateBalance() {
           <ul className="passkeys">
             {rows.map((r) => (
               <li key={r.bucket + r.tokenAddress}>
-                {r.tokenAddress.toLowerCase() === SEPOLIA_USDT.toLowerCase() ? (
-                  <strong>USDT</strong>
-                ) : (
-                  <code>{r.tokenAddress.slice(0, 8)}…</code>
-                )}
-                <span data-testid={`balance-${r.bucket}`}>
-                  {r.tokenAddress.toLowerCase() === SEPOLIA_USDT.toLowerCase() ? formatUnits(r.amount, USDT_DECIMALS) : r.amount}{' '}
+                {tokenLabel(r.tokenAddress)}
+                <span data-testid={`balance-${r.bucket}-${tokenKey(r.tokenAddress)}`}>
+                  {tokenAmount(r.tokenAddress, r.amount)}{' '}
                   <span className="muted small">({BUCKET_LABELS[r.bucket] ?? r.bucket})</span>
                 </span>
               </li>

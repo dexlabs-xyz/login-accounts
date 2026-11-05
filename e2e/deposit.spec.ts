@@ -76,7 +76,9 @@ test('deposit USDC on Ethereum Sepolia → private USDT', async ({ page }) => {
   await expect(add.getByRole('link', { name: 'View on Sepolia Etherscan' }).first()).toBeVisible();
   log(`shield tx: ${await add.getByRole('link', { name: 'View on Sepolia Etherscan' }).first().getAttribute('href')}`);
   await expect(card.getByText('USDT')).toBeVisible({ timeout: 300_000 });
-  log(`private balance: ${(await card.innerText()).replace(/\n+/g, ' | ').slice(-160)}`);
+  // The leftover testnet gas was shielded as WETH, to pay broadcaster fees for private sends.
+  await expect(card.getByText('ETH (for network fees)')).toBeVisible({ timeout: 300_000 });
+  log(`private balance: ${(await card.innerText()).replace(/\n+/g, ' | ').slice(-200)}`);
 
   // Nothing secret left the device during the whole deposit (Tidepool, faucet, RPC, Railgun traffic).
   const hosts = leaks.hosts();

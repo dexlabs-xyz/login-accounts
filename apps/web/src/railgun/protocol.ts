@@ -3,6 +3,8 @@
 /** Tidepool's test USDT on Ethereum Sepolia (checked 2026-11-04, see docs/design/passkeys.md). TESTNET ONLY. */
 export const SEPOLIA_USDT = '0x650F12bA31777DE8Ded47287a8CC86bE737646fe';
 export const USDT_DECIMALS = 6;
+/** Railgun's wrapped ETH on Sepolia (from Railgun's network config): pays broadcaster fees. TESTNET ONLY. */
+export const SEPOLIA_WETH = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14';
 
 export type DepositStatus =
   | 'new' // fresh address reserved, no quote yet
@@ -36,6 +38,8 @@ export interface DepositRecord {
   quote?: DepositQuote;
   approveTx?: string;
   shieldTx?: string;
+  /** Leftover ETH shielded as WETH for broadcaster fees. */
+  feeShieldTx?: string;
   createdAt: number;
   updatedAt: number;
 }
