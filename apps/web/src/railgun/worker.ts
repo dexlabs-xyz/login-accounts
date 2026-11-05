@@ -23,12 +23,13 @@ import {
   createRailgunWallet,
   loadProvider,
   refreshBalances,
+  refreshReceivePOIsForWallet,
   setLoggers,
   setOnBalanceUpdateCallback,
   setOnUTXOMerkletreeScanCallback,
   startRailgunEngine,
 } from '@railgun-community/wallet';
-import { NETWORK_CONFIG, NetworkName, type RailgunBalancesEvent } from '@railgun-community/shared-models';
+import { NETWORK_CONFIG, NetworkName, TXIDVersion, type RailgunBalancesEvent } from '@railgun-community/shared-models';
 import { Mnemonic } from 'ethers';
 import { DERIVED_KEY_LABELS, deriveKeyMaterial } from '@login/vault';
 import { createDeposits } from './deposits.ts';
@@ -43,6 +44,34 @@ const post = (m: FromWorker) => self.postMessage(m);
 let walletId: string | null = null;
 let deposits: ReturnType<typeof createDeposits> | null = null;
 let shieldFeeBasisPoints: string | null = null;
+
+/**
+ * Shields stay "pending" until the wallet fetches their Proof of Innocence
+ * result from the POI node, and the SDK doesn't do that by itself. While any
+ * received funds are still pending, ask once a minute, then update balances.
+ */
+const POI_REFRESH_MS = 60_000;
+let hasPendingReceive = false;
+let poiTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function refreshPOIs() {
+  if (!walletId) return;
+  try {
+    await refreshReceivePOIsForWallet(TXIDVersion.V2_PoseidonMerkle, NETWORK, walletId);
+    await refreshBalances(CHAIN, [walletId]);
+  } catch {
+    // The POI node is a third party and may be slow; try again next round.
+  }
+}
+
+function schedulePOIRefresh() {
+  clearTimeout(poiTimer);
+  if (!hasPendingReceive) return;
+  poiTimer = setTimeout(async () => {
+    await refreshPOIs();
+    schedulePOIRefresh();
+  }, POI_REFRESH_MS);
+}
 
 const errorDetail = (err: unknown) =>
   // Development only, to debug the SDK. Never in production builds.
@@ -94,6 +123,13 @@ function startEngine(poiNodeURLs: string[]) {
     );
     setOnBalanceUpdateCallback((e: RailgunBalancesEvent) => {
       if (e.railgunWalletID !== walletId) return;
+      if (e.balanceBucket === 'ShieldPending' || e.balanceBucket === 'MissingExternalPOI') {
+        const pending = e.erc20Amounts.some((a) => a.amount > 0n);
+        if (pending !== hasPendingReceive) {
+          hasPendingReceive = pending;
+          schedulePOIRefresh();
+        }
+      }
       post({
         type: 'balances',
         bucket: e.balanceBucket as 'Spendable',
@@ -148,8 +184,11 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
       shieldFeeBasisPoints = feesSerialized.shieldFeeV2;
       // Starts this wallet's balance scan (loading the provider alone doesn't).
       await refreshBalances(CHAIN, [info.id]);
+      // Fetch any Proof of Innocence results that arrived while the wallet was locked.
+      await refreshPOIs();
     } else if (msg.type === 'refresh' && walletId) {
       await refreshBalances(CHAIN, [walletId]);
+      await refreshPOIs();
     } else if (msg.type === 'call') {
       try {
         if (!deposits) throw new Error('Wallet not open.');
