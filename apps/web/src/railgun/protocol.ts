@@ -51,7 +51,9 @@ export type DepositMethod =
   | 'deposit.balances'
   | 'deposit.shield'
   | 'deposit.rescan'
-  | 'fees';
+  | 'fees'
+  | 'send.quote'
+  | 'send.execute';
 
 export type ToWorker =
   /** rootSecret is transferred (not copied): the page's copy is wiped by the transfer. */
@@ -74,6 +76,8 @@ export type FromWorker =
   | { type: 'scan'; status: 'Started' | 'Updated' | 'Complete' | 'Incomplete'; progress: number }
   | { type: 'balances'; bucket: BalanceBucket; erc20: { tokenAddress: string; amount: string }[] }
   | { type: 'deposits'; records: DepositRecord[] }
+  /** Proof generation progress for a private send, 0..100. */
+  | { type: 'send-progress'; progress: number }
   | { type: 'result'; id: number; ok: true; value: unknown }
   | { type: 'result'; id: number; ok: false; error: string; detail?: string }
   | { type: 'error'; message: string; /** development builds only */ detail?: string };

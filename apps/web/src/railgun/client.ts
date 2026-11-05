@@ -24,6 +24,8 @@ export interface PrivateWalletState {
   error: string | null;
   /** This device's deposit records (decrypted inside the worker). */
   deposits: DepositRecord[];
+  /** Proof generation progress for a private send in flight (0..100), or null. */
+  sendProgress: number | null;
 }
 
 const initial: PrivateWalletState = {
@@ -33,6 +35,7 @@ const initial: PrivateWalletState = {
   balances: {},
   error: null,
   deposits: [],
+  sendProgress: null,
 };
 let nextCallId = 1;
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -66,6 +69,7 @@ export const privateWallet = {
         set({ scanProgress: m.progress, status: m.status === 'Complete' ? 'ready' : state.status === 'off' ? 'off' : 'syncing' });
       else if (m.type === 'balances') set({ balances: { ...state.balances, [m.bucket]: m.erc20 } });
       else if (m.type === 'deposits') set({ deposits: m.records });
+      else if (m.type === 'send-progress') set({ sendProgress: m.progress });
       else if (m.type === 'result') {
         const p = pending.get(m.id);
         pending.delete(m.id);
@@ -95,7 +99,11 @@ export const privateWallet = {
     worker?.postMessage({ type: 'refresh' });
   },
 
-  /** Ask the worker to do something with deposits. Rejects if the wallet is locked. */
+  clearSendProgress() {
+    set({ sendProgress: null });
+  },
+
+  /** Ask the worker to do something (deposits, sends). Rejects if the wallet is locked. */
   call<T>(method: DepositMethod, params?: unknown): Promise<T> {
     if (!worker) return Promise.reject(new Error('Wallet locked.'));
     const id = nextCallId++;

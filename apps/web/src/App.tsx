@@ -4,6 +4,7 @@ import { api, ApiError } from './api.ts';
 import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDT, SEPOLIA_WETH, USDT_DECIMALS } from './railgun/protocol.ts';
 import { AddMoney } from './deposits/AddMoney.tsx';
+import { SendPrivately } from './send/SendPrivately.tsx';
 import { formatUnits } from './deposits/tidepool.ts';
 import {
   addPasskey,
@@ -544,6 +545,19 @@ function Account({
       </section>
 
       {me.hasVault && open && <PrivateBalance />}
+      {me.hasVault && open && (
+        <SendPrivately
+          confirmWithPasskey={async () => {
+            try {
+              const o = await unlock(me);
+              return o.kind === 'opened';
+            } catch (e) {
+              setError(explain(e));
+              return false;
+            }
+          }}
+        />
+      )}
       {me.hasVault && open && <AddMoney />}
 
       {atRisk && (

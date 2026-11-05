@@ -33,6 +33,9 @@ import { NETWORK_CONFIG, NetworkName, TXIDVersion, type RailgunBalancesEvent } f
 import { Mnemonic } from 'ethers';
 import { DERIVED_KEY_LABELS, deriveKeyMaterial } from '@login/vault';
 import { createDeposits } from './deposits.ts';
+import { createSender } from './send.ts';
+import { getProver } from '@railgun-community/wallet';
+import { groth16 } from 'snarkjs';
 import type { FromWorker, ToWorker } from './protocol.ts';
 
 const NETWORK = NetworkName.EthereumSepolia;
@@ -43,6 +46,9 @@ const WALLET_SOURCE = 'loginaccounts'; // shown on-chain as the shield source; l
 const post = (m: FromWorker) => self.postMessage(m);
 let walletId: string | null = null;
 let deposits: ReturnType<typeof createDeposits> | null = null;
+let sender: ReturnType<typeof createSender> | null = null;
+/** Latest spendable private balances by token (lowercase address), for send checks. */
+const spendable = new Map<string, bigint>();
 let shieldFeeBasisPoints: string | null = null;
 
 /**
@@ -118,11 +124,17 @@ function startEngine(poiNodeURLs: string[]) {
       false,
       poiNodeURLs.length > 0 ? poiNodeURLs : undefined,
     );
+    // Zero-knowledge proofs for private sends are generated in this worker.
+    getProver().setSnarkJSGroth16(groth16 as Parameters<ReturnType<typeof getProver>['setSnarkJSGroth16']>[0]);
     setOnUTXOMerkletreeScanCallback((e) =>
       post({ type: 'scan', status: e.scanStatus as 'Started', progress: e.progress }),
     );
     setOnBalanceUpdateCallback((e: RailgunBalancesEvent) => {
       if (e.railgunWalletID !== walletId) return;
+      if (e.balanceBucket === 'Spendable') {
+        spendable.clear();
+        for (const a of e.erc20Amounts) spendable.set(a.tokenAddress.toLowerCase(), a.amount);
+      }
       if (e.balanceBucket === 'ShieldPending' || e.balanceBucket === 'MissingExternalPOI') {
         const pending = e.erc20Amounts.some((a) => a.amount > 0n);
         if (pending !== hasPendingReceive) {
@@ -170,6 +182,13 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
         onChange: (records) => post({ type: 'deposits', records }),
       });
       post({ type: 'deposits', records: await deposits.list() });
+      sender = createSender({
+        walletId: info.id,
+        encryptionKey: dbKeyHex,
+        rpcUrl: SEPOLIA_RPC,
+        spendable: () => spendable,
+        onProgress: (progress) => post({ type: 'send-progress', progress }),
+      });
 
       // Sepolia requires a Proof of Innocence node before the SDK will read the chain.
       if (msg.poiNodeURLs.length === 0) {
@@ -211,6 +230,15 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
               return deposits.rescan();
             case 'fees':
               return { shieldFeeBasisPoints };
+            case 'send.quote':
+              if (!sender) throw new Error('Wallet not open.');
+              return sender.quote(msg.params);
+            case 'send.execute': {
+              if (!sender) throw new Error('Wallet not open.');
+              const r = await sender.execute(msg.params);
+              if (walletId) void refreshBalances(CHAIN, [walletId]);
+              return r;
+            }
           }
         })();
         post({ type: 'result', id: msg.id, ok: true, value });
