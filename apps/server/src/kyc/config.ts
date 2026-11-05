@@ -22,6 +22,11 @@ export interface KycConfig {
   webhookSecret: string | null;
   /** The level names configured in the Sumsub sandbox dashboard. */
   levelNames: Record<Level, string>;
+  /**
+   * The levels that exist in the Sumsub dashboard (SUMSUB_LEVELS, e.g.
+   * "L1,L2"). Default: all. Levels build in order, so this is always a prefix.
+   */
+  enabledLevels: Level[];
 }
 
 /** Returns null when KYC isn't configured, so the rest of Login still runs without it. */
@@ -39,7 +44,14 @@ export function loadKycConfig(env: NodeJS.ProcessEnv, rpId: string): KycConfig |
   if (!webhookSecret && rpId !== 'localhost') {
     throw new Error('SUMSUB_WEBHOOK_SECRET is required outside local development.');
   }
+  const enabledLevels = (env.SUMSUB_LEVELS?.trim() || LEVELS.join(','))
+    .split(',')
+    .map((l) => l.trim().toUpperCase());
+  if (!enabledLevels.every((l, i) => l === LEVELS[i])) {
+    throw new Error('SUMSUB_LEVELS must list levels in order from L1, for example "L1" or "L1,L2".');
+  }
   return {
+    enabledLevels: enabledLevels as Level[],
     appToken,
     secretKey,
     webhookSecret,

@@ -9,7 +9,7 @@ import { loadConfig } from '../config.ts';
 import { openDb, type DB } from '../db.ts';
 import { loadKycConfig, type KycConfig } from './config.ts';
 import { kycClaims, outcomeOf } from './outcome.ts';
-import { createSumsubClient, pickStatus, signRequest, verifyWebhook, type ReviewStatus, type SumsubClient } from './sumsub.ts';
+import { createSumsubClient, pickStatus, signRequest, verifyWebhook, type ReviewStatus, type SimulatedReview, type SumsubClient } from './sumsub.ts';
 
 const env = (o: Record<string, string>) => o as NodeJS.ProcessEnv;
 const status = (o: Partial<ReviewStatus>): ReviewStatus => ({
@@ -140,6 +140,18 @@ class FakeSumsub implements SumsubClient {
   async reviewStatus(applicantId: string) {
     if (this.down) throw new Error('down');
     return this.statuses.get(applicantId) ?? status({ reviewStatus: 'init', answer: null });
+  }
+  simulated: { applicantId: string; result: SimulatedReview }[] = [];
+  async simulateReview(applicantId: string, result: SimulatedReview) {
+    if (this.down) throw new Error('down');
+    this.simulated.push({ applicantId, result });
+    const levelName = this.tokens.at(-1)?.levelName ?? 'login-l1-liveness';
+    this.statuses.set(
+      applicantId,
+      result.answer === 'GREEN'
+        ? status({ levelName })
+        : status({ levelName, answer: 'RED', rejectType: result.rejectType, rejectLabels: result.rejectLabels }),
+    );
   }
 }
 
@@ -336,5 +348,94 @@ describe('KYC API, local polling mode', () => {
     expect((await call('POST', '/api/kyc/applicant', a, { applicantId: 'app111' })).status).toBe(200);
     expect((await call('POST', '/api/kyc/applicant', a, { applicantId: 'app222' })).status).toBe(409);
     expect((await call('POST', '/api/kyc/applicant', b, { applicantId: 'app111' })).status).toBe(409);
+  });
+});
+
+describe('simulated review results (sandbox, localhost only)', () => {
+  beforeEach(() => makeApp(null));
+
+  async function startedWithApplicant(cookie: string) {
+    await call('POST', '/api/kyc/start', cookie, { level: 'L1' });
+    await call('POST', '/api/kyc/applicant', cookie, { applicantId: 'app222' });
+  }
+
+  it('is offered on localhost and records a pass through the normal status API', async () => {
+    const cookie = signedIn();
+    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ simulate: true });
+    await startedWithApplicant(cookie);
+    const r = await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ level: 'L1', verifiedHuman: true });
+    expect(fake.simulated).toEqual([{ applicantId: 'app222', result: { answer: 'GREEN' } }]);
+  });
+
+  it('simulates a duplicate as final', async () => {
+    const cookie = signedIn();
+    await startedWithApplicant(cookie);
+    expect(await (await call('POST', '/api/kyc/simulate', cookie, { result: 'duplicate' })).json()).toMatchObject({
+      level: null,
+      attempt: { state: 'final', reason: 'duplicate' },
+    });
+  });
+
+  it('needs a linked applicant and a known result', async () => {
+    const cookie = signedIn();
+    expect((await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' })).status).toBe(409);
+    await startedWithApplicant(cookie);
+    expect((await call('POST', '/api/kyc/simulate', cookie, { result: 'toString' })).status).toBe(400);
+  });
+
+  it('does not exist outside localhost', async () => {
+    db = openDb(':memory:');
+    fake = new FakeSumsub();
+    const config = loadConfig(env({ WEBAUTHN_RP_ID: 'withlogin.com', WEBAUTHN_ORIGINS: 'https://withlogin.com' }));
+    const kycConfig = loadKycConfig(env({ SUMSUB_APP_TOKEN: 'sbx:t', SUMSUB_SECRET_KEY: 's', SUMSUB_WEBHOOK_SECRET: 'w' }), 'withlogin.com')!;
+    app = createApp({ config, db, mailer: devOutboxMailer([]), kyc: { config: kycConfig, sumsub: fake } });
+    const cookie = signedIn();
+    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ simulate: false });
+    expect((await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' })).status).toBe(404);
+  });
+});
+
+describe('Sumsub client: simulated review', () => {
+  it('calls the sandbox testCompleted endpoint, signed', async () => {
+    const calls: { url: string; body: string }[] = [];
+    const client = createSumsubClient({
+      appToken: 'sbx:t',
+      secretKey: 's',
+      fetch: (async (url: string, init: RequestInit) => {
+        calls.push({ url, body: String(init.body) });
+        return new Response('{"ok":1}', { status: 200 });
+      }) as typeof fetch,
+    });
+    await client.simulateReview('abc123', { answer: 'RED', rejectType: 'RETRY', rejectLabels: ['BAD_SELFIE'] });
+    expect(calls[0]!.url).toBe('https://api.sumsub.com/resources/applicants/abc123/status/testCompleted');
+    expect(JSON.parse(calls[0]!.body)).toEqual({ reviewAnswer: 'RED', reviewRejectType: 'RETRY', rejectLabels: ['BAD_SELFIE'] });
+  });
+});
+
+describe('enabled levels (SUMSUB_LEVELS)', () => {
+  it('defaults to all levels and refuses gaps or wrong order', () => {
+    const base = { SUMSUB_APP_TOKEN: 'sbx:t', SUMSUB_SECRET_KEY: 's' };
+    expect(loadKycConfig(env(base), 'localhost')!.enabledLevels).toEqual(['L1', 'L2', 'L3']);
+    expect(loadKycConfig(env({ ...base, SUMSUB_LEVELS: 'L1, l2' }), 'localhost')!.enabledLevels).toEqual(['L1', 'L2']);
+    expect(() => loadKycConfig(env({ ...base, SUMSUB_LEVELS: 'L1,L3' }), 'localhost')).toThrow(/in order/);
+    expect(() => loadKycConfig(env({ ...base, SUMSUB_LEVELS: 'L2' }), 'localhost')).toThrow(/in order/);
+  });
+
+  it('does not start a level that is not set up at Sumsub', async () => {
+    db = openDb(':memory:');
+    fake = new FakeSumsub();
+    const kycConfig = loadKycConfig(env({ SUMSUB_APP_TOKEN: 'sbx:t', SUMSUB_SECRET_KEY: 's', SUMSUB_LEVELS: 'L1' }), 'localhost')!;
+    app = createApp({ config: loadConfig(env({ DEV_OUTBOX: '1' })), db, mailer: devOutboxMailer([]), kyc: { config: kycConfig, sumsub: fake } });
+    const cookie = signedIn();
+    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ levels: ['L1'] });
+    await call('POST', '/api/kyc/start', cookie, { level: 'L1' });
+    await call('POST', '/api/kyc/applicant', cookie, { applicantId: 'app333' });
+    await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' });
+    const r = await call('POST', '/api/kyc/start', cookie, { level: 'L2' });
+    expect(r.status).toBe(409);
+    expect(await r.json()).toEqual({ error: 'level-unavailable' });
+    expect(fake.tokens).toHaveLength(1);
   });
 });

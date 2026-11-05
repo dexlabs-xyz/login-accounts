@@ -21,6 +21,10 @@ type KycView =
       mode: 'webhook' | 'polling';
       level: Level | null;
       verifiedHuman: boolean;
+      /** Local development only: the simulated-review test panel is available. */
+      simulate: boolean;
+      /** The levels set up at Sumsub, in order. */
+      levels: Level[];
       attempt: { level: Level; state: AttemptState; reason: Reason | null } | null;
     };
 
@@ -29,6 +33,19 @@ const LEVEL_INFO: Record<Level, { title: string; what: string; time: string }> =
   L2: { title: 'Verified identity', what: 'a scan of your ID document', time: 'about 2 minutes' },
   L3: { title: 'Verified address', what: 'a photo of a proof of address, like a utility bill', time: 'about 2 minutes' },
 };
+
+/**
+ * SIMULATED REVIEW RESULTS, local development only. The sandbox liveness check
+ * needs a real face, and nobody's real face goes into the sandbox, so this
+ * panel asks Sumsub's sandbox to record a result instead.
+ */
+const SIMULATED: { result: string; label: string }[] = [
+  { result: 'pass', label: 'Pass' },
+  { result: 'retry-selfie', label: 'Retry: bad selfie' },
+  { result: 'retry-document', label: 'Retry: unreadable document' },
+  { result: 'duplicate', label: 'Reject: duplicate face' },
+  { result: 'fraud', label: 'Reject: suspected fraud' },
+];
 
 const next = (level: Level | null): Level | null => (level === null ? 'L1' : level === 'L1' ? 'L2' : level === 'L2' ? 'L3' : null);
 
@@ -63,6 +80,8 @@ function explainKyc(err: unknown): string {
       'needs-lower-level': 'Finish the previous step first.',
       'verification-closed': 'This verification can’t be retried.',
       'signed-out': 'You’ve been signed out. Sign in again.',
+      'level-unavailable': 'This step isn’t available yet.',
+      'not-started': 'Sumsub hasn’t created the test applicant yet. Click Continue in the window above first.',
     };
     return m[err.code] ?? 'Something went wrong. Try again.';
   }
@@ -77,6 +96,7 @@ export function KycCard() {
   const [error, setError] = useState('');
   const container = useRef<HTMLDivElement>(null);
   const sdk = useRef<{ destroy(): void } | null>(null);
+  const [widget, setWidget] = useState<{ level: Level; token: string; polling: boolean } | null>(null);
 
   const load = useCallback(async (refresh = false) => {
     try {
@@ -107,8 +127,7 @@ export function KycCard() {
   }, [inReview, load]);
 
   const closeWidget = useCallback(async () => {
-    sdk.current?.destroy();
-    sdk.current = null;
+    setWidget(null); // the widget effect's cleanup destroys the SDK
     setStage('idle');
     await load(true);
   }, [load]);
@@ -117,31 +136,52 @@ export function KycCard() {
     setError('');
     setBusy(true);
     try {
-      const start = () => api<{ token: string } & KycView>('POST', '/api/kyc/start', { level });
-      const first = await start();
+      const first = await api<{ token: string } & KycView>('POST', '/api/kyc/start', { level });
       setView(first);
+      setWidget({ level, token: first.token, polling: first.available && first.mode === 'polling' });
       setStage('widget');
-      const polling = first.available && first.mode === 'polling';
-      // Wait a tick so the container is on screen.
-      await new Promise((r) => setTimeout(r, 0));
-      sdk.current?.destroy();
-      const instance = snsWebSdk
-        .init(first.token, async () => (await start()).token)
-        .withConf({ lang: 'en', theme: 'light' })
-        .withOptions({ addViewportTag: false, adaptIframeHeight: true })
-        .on('idCheck.onApplicantLoaded', (p) => {
-          // Local development only: the server polls Sumsub using this ID.
-          if (polling) void api<KycView>('POST', '/api/kyc/applicant', { applicantId: p.applicantId }).then(setView, () => {});
-        })
-        .on('idCheck.onApplicantSubmitted', () => void load(true))
-        .on('idCheck.onApplicantStatusChanged', () => void load(true))
-        .on('idCheck.onError', () => setError('The verification window had a problem. Close it and try again.'))
-        .build();
-      instance.launch(container.current!);
-      sdk.current = instance;
     } catch (e) {
       setError(explainKyc(e));
       setStage('idle');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Starts the Sumsub widget once its container is on screen.
+  useEffect(() => {
+    if (stage !== 'widget' || !widget || !container.current) return;
+    const { level, token, polling } = widget;
+    const instance = snsWebSdk
+      .init(token, async () => (await api<{ token: string }>('POST', '/api/kyc/start', { level })).token)
+      .withConf({ lang: 'en', theme: 'light' })
+      .withOptions({ addViewportTag: false, adaptIframeHeight: true })
+      .on('idCheck.onApplicantLoaded', (p) => {
+        // Local development only: the server polls Sumsub using this ID.
+        if (polling) void api<KycView>('POST', '/api/kyc/applicant', { applicantId: p.applicantId }).then(setView, () => {});
+      })
+      .on('idCheck.onApplicantSubmitted', () => void load(true))
+      .on('idCheck.onApplicantStatusChanged', () => void load(true))
+      .on('idCheck.onError', () => setError('The verification window had a problem. Close it and try again.'))
+      .build();
+    instance.launch(container.current);
+    sdk.current = instance;
+    return () => {
+      instance.destroy();
+      if (sdk.current === instance) sdk.current = null;
+    };
+  }, [stage, widget, load]);
+
+  const simulate = async (result: string) => {
+    setError('');
+    setBusy(true);
+    try {
+      const v = await api<KycView>('POST', '/api/kyc/simulate', { result });
+      setWidget(null);
+      setStage('idle');
+      setView(v);
+    } catch (e) {
+      setError(explainKyc(e));
     } finally {
       setBusy(false);
     }
@@ -166,7 +206,8 @@ export function KycCard() {
     );
   }
 
-  const nextLevel = next(view.level);
+  const following = next(view.level);
+  const nextLevel = following && view.levels.includes(following) ? following : null;
   const a = view.attempt;
   const current = a && a.state !== 'passed' && a.level === nextLevel ? a : null;
 
@@ -212,6 +253,21 @@ export function KycCard() {
       {stage === 'widget' && (
         <div>
           <div ref={container} id="sumsub-websdk-container" />
+          {view.simulate && (
+            <div className="warning small" role="group" aria-label="Simulated result">
+              <p>
+                <strong>Test panel (local development only).</strong> Sumsub’s sandbox can’t check a face without a real one.
+                Open the step above until it asks for the camera, then pick the result Sumsub should record.
+              </p>
+              <div className="row">
+                {SIMULATED.map((m) => (
+                  <button key={m.result} disabled={busy} onClick={() => void simulate(m.result)}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <button className="link" onClick={() => void closeWidget()}>
             Close. You can come back to this later.
           </button>

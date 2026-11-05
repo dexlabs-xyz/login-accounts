@@ -578,7 +578,7 @@ export function createApp({ config, db, mailer, outbox, kyc = null, now = Date.n
 
   // ---------- KYC (docs/kyc-architecture.md) ----------
 
-  registerKycRoutes(app, { db, kyc, session, now });
+  registerKycRoutes(app, { db, kyc, session, now, localDev: config.rpId === 'localhost' });
 
   // ---------- development only ----------
 

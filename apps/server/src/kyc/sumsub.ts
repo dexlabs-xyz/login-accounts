@@ -33,7 +33,18 @@ export interface SumsubClient {
   /** Token for the Sumsub widget. Sumsub creates the applicant on first use. */
   sdkToken(externalUserId: string, levelName: string): Promise<string>;
   reviewStatus(applicantId: string): Promise<ReviewStatus>;
+  /**
+   * SANDBOX ONLY, local development only: sets a test applicant's review
+   * result without a camera or documents (Sumsub's "Simulate review response
+   * in Sandbox"). Sumsub refuses it outside the sandbox.
+   */
+  simulateReview(applicantId: string, result: SimulatedReview): Promise<void>;
 }
+
+/** What a simulated review can say. Labels must be Sumsub rejection labels. */
+export type SimulatedReview =
+  | { answer: 'GREEN' }
+  | { answer: 'RED'; rejectType: 'RETRY' | 'FINAL'; rejectLabels: string[] };
 
 /** Sumsub answered with an error. The body is never kept: it could echo request data. */
 export class SumsubError extends Error {
@@ -118,6 +129,16 @@ export function createSumsubClient(opts: {
     async reviewStatus(applicantId) {
       if (!isApplicantId(applicantId)) throw new SumsubError(400);
       return pickStatus(await call('GET', `/resources/applicants/${applicantId}/status`));
+    },
+    async simulateReview(applicantId, result) {
+      if (!isApplicantId(applicantId)) throw new SumsubError(400);
+      await call(
+        'POST',
+        `/resources/applicants/${applicantId}/status/testCompleted`,
+        result.answer === 'GREEN'
+          ? { reviewAnswer: 'GREEN', rejectLabels: [] }
+          : { reviewAnswer: 'RED', reviewRejectType: result.rejectType, rejectLabels: result.rejectLabels },
+      );
     },
   };
 }

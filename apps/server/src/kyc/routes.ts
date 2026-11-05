@@ -20,7 +20,21 @@ import type { Context, Hono } from 'hono';
 import type { DB } from '../db.ts';
 import { LEVELS, type KycConfig, type Level } from './config.ts';
 import { higher, outcomeOf, rank, type AttemptState, type Reason } from './outcome.ts';
-import { isApplicantId, verifyWebhook, type ReviewStatus, type SumsubClient } from './sumsub.ts';
+import { isApplicantId, verifyWebhook, type ReviewStatus, type SimulatedReview, type SumsubClient } from './sumsub.ts';
+
+/**
+ * SIMULATED REVIEW RESULTS (sandbox + localhost only). The sandbox liveness
+ * check needs a real face, and nobody's real face goes into the sandbox. So in
+ * local development a test panel asks Sumsub's sandbox to record a result for
+ * the test applicant. Login then reads it back through the normal status API.
+ */
+export const SIMULATED_REVIEWS: Record<string, SimulatedReview> = {
+  pass: { answer: 'GREEN' },
+  'retry-selfie': { answer: 'RED', rejectType: 'RETRY', rejectLabels: ['BAD_SELFIE'] },
+  'retry-document': { answer: 'RED', rejectType: 'RETRY', rejectLabels: ['UNSATISFACTORY_PHOTOS'] },
+  duplicate: { answer: 'RED', rejectType: 'FINAL', rejectLabels: ['DUPLICATE'] },
+  fraud: { answer: 'RED', rejectType: 'FINAL', rejectLabels: ['FRAUDULENT_LIVENESS'] },
+};
 
 export interface KycDeps {
   config: KycConfig;
@@ -62,7 +76,20 @@ const fail = (c: Context, status: 400 | 403 | 404 | 409 | 502 | 503, error: stri
 
 export function registerKycRoutes(
   app: Hono,
-  { db, kyc, session, now }: { db: DB; kyc: KycDeps | null; session: (c: Context) => { user: { id: string } }; now: () => number },
+  {
+    db,
+    kyc,
+    session,
+    now,
+    localDev = false,
+  }: {
+    db: DB;
+    kyc: KycDeps | null;
+    session: (c: Context) => { user: { id: string } };
+    now: () => number;
+    /** True only when the RP ID is localhost. Turns on the simulated-review panel. */
+    localDev?: boolean;
+  },
 ): void {
   migrateKyc(db);
 
@@ -118,6 +145,8 @@ export function registerKycRoutes(
       mode: kyc!.config.webhookSecret ? 'webhook' : 'polling',
       level: s?.level ?? null,
       verifiedHuman: rank(s?.level ?? null) >= 1,
+      simulate: localDev,
+      levels: kyc!.config.enabledLevels,
       attempt: s?.attempt_level
         ? { level: s.attempt_level, state: s.attempt_state, reason: s.attempt_reason }
         : null,
@@ -144,6 +173,7 @@ export function registerKycRoutes(
     const body = (await c.req.json().catch(() => ({}))) as { level?: unknown };
     const level = LEVELS.find((l) => l === body.level);
     if (!level) return fail(c, 400, 'invalid-level');
+    if (!kyc.config.enabledLevels.includes(level)) return fail(c, 409, 'level-unavailable');
 
     const cur = statusOf(s.user.id);
     if (rank(cur?.level ?? null) >= rank(level)) return fail(c, 409, 'already-verified');
@@ -207,6 +237,24 @@ export function registerKycRoutes(
       return fail(c, 409, 'applicant-mismatch'); // already linked to another account
     }
     try {
+      await refreshFromSumsub(s.user.id);
+    } catch (err) {
+      return sumsubDown(c, err);
+    }
+    return c.json(view(s.user.id));
+  });
+
+  /** SIMULATED REVIEW RESULTS: see SIMULATED_REVIEWS above. Localhost only. */
+  app.post('/api/kyc/simulate', async (c) => {
+    const s = session(c);
+    if (!kyc || !localDev) return fail(c, 404, 'not-found');
+    const body = (await c.req.json().catch(() => ({}))) as { result?: unknown };
+    const review = typeof body.result === 'string' && Object.hasOwn(SIMULATED_REVIEWS, body.result) ? SIMULATED_REVIEWS[body.result] : null;
+    if (!review) return fail(c, 400, 'invalid-result');
+    const link = linkOf(s.user.id);
+    if (!link?.applicant_id) return fail(c, 409, 'not-started');
+    try {
+      await kyc.sumsub.simulateReview(link.applicant_id, review);
       await refreshFromSumsub(s.user.id);
     } catch (err) {
       return sumsubDown(c, err);
