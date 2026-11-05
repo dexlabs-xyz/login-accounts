@@ -9,6 +9,7 @@ import { devOutboxMailer } from '../mail.ts';
 import { loadConfig } from '../config.ts';
 import { openDb, type DB } from '../db.ts';
 import { loadKycConfig, type KycConfig } from './config.ts';
+import { createGetKycClaims } from './claims.ts';
 import { kycClaims, outcomeOf } from './outcome.ts';
 import { createSumsubClient, pickStatus, signRequest, verifyWebhook, type ReviewStatus, type SimulatedReview, type SumsubClient } from './sumsub.ts';
 
@@ -124,6 +125,15 @@ describe('outcomes and claims', () => {
     expect(kycClaims(null, ['kyc_level'])).toEqual({});
     expect(kycClaims('L1', [])).toEqual({ verified_human: true });
     expect(kycClaims('L2', ['kyc_level'])).toEqual({ verified_human: true, kyc_level: 'L2' });
+  });
+  it('gives OIDC the claims for a user from the stored level, labelled as sandbox', async () => {
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO users (id, email, webauthn_user_id, created_at) VALUES ('u1', 'a@example.com', 'h1', 0)").run();
+    db.prepare("INSERT INTO kyc_status (user_id, level, attempt_level, attempt_state, attempt_reason, updated_at) VALUES ('u1', 'L2', 'L2', 'passed', NULL, 0)").run();
+    const getKycClaims = createGetKycClaims(db);
+    expect(await getKycClaims('nobody', ['openid', 'kyc_level'])).toEqual({});
+    expect(await getKycClaims('u1', ['openid'])).toEqual({ verified_human: true, verification_sandbox: true });
+    expect(await getKycClaims('u1', ['openid', 'kyc_level'])).toEqual({ verified_human: true, kyc_level: 'L2', verification_sandbox: true });
   });
 });
 

@@ -5,6 +5,7 @@ import { openDb } from './db.ts';
 import { loadKycConfig } from './kyc/config.ts';
 import { createSumsubClient } from './kyc/sumsub.ts';
 import { devOutboxMailer, type Mailer, type OutboxEmail } from './mail.ts';
+import { ethersGasSender } from './testnet-gas/sender.ts';
 
 const config = loadConfig();
 const outbox: OutboxEmail[] = [];
@@ -22,7 +23,13 @@ const kyc = kycConfig
   ? { config: kycConfig, sumsub: createSumsubClient({ appToken: kycConfig.appToken, secretKey: kycConfig.secretKey }) }
   : null;
 
-const { app } = createApp({ config, db: openDb(config.dbPath), mailer, outbox, kyc });
+// TESTNET-ONLY gas faucet: on only when its key is set. Contradicts D6; never on mainnet.
+const faucetKey = process.env.TESTNET_GAS_FAUCET_KEY;
+const gasSender = faucetKey
+  ? ethersGasSender(process.env.SEPOLIA_RPC_URL ?? 'https://ethereum-sepolia-rpc.publicnode.com', faucetKey)
+  : null;
+
+const { app } = createApp({ config, db: openDb(config.dbPath), mailer, outbox, kyc, gasSender });
 
 serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' }, ({ port }) => {
   console.log(`Login API on http://127.0.0.1:${port} (RP ID: ${config.rpId})`);
@@ -31,5 +38,10 @@ serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' }, ({ port })
     !kycConfig
       ? 'KYC off: set SUMSUB_APP_TOKEN and SUMSUB_SECRET_KEY (sandbox) to turn it on.'
       : `KYC on: Sumsub SANDBOX, ${kycConfig.webhookSecret ? 'webhooks' : 'polling (local development)'}.`,
+  );
+  console.log(
+    gasSender
+      ? 'TESTNET gas faucet ON (simulation, Sepolia only; contradicts D6, never on mainnet).'
+      : 'Testnet gas faucet off (set TESTNET_GAS_FAUCET_KEY to enable).',
   );
 });

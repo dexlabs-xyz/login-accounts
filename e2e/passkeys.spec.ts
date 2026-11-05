@@ -9,6 +9,10 @@ import { Device, disableAutofill, freshEmail, latestCode, recordSecrets, recordW
 // real user never does. Keep autofill off except where a test turns it on.
 test.beforeEach(async ({ page }) => {
   await disableAutofill(page);
+  // The passkey lab doesn't test Railgun: keep it off live Sepolia services so
+  // background wallet syncs can't slow these tests down or make them flaky.
+  // (e2e/railgun.spec.ts uses the real services.)
+  await page.context().route(/(publicnode\.com|squids\.live|ipfs-lb\.com|fdi\.network)/, (r) => r.abort());
 });
 
 test.describe('sign-up', () => {
@@ -269,8 +273,9 @@ test.describe('sign-in handoff for apps (OIDC contract)', () => {
     const device = await Device.add(page);
     await signUp(page);
     const before = await uses(device);
-    await page.goto('/signin?interaction=abc123');
-    await page.waitForURL(complete('abc123'));
+    // The page redirects immediately, so don't wait for /signin itself to finish loading.
+    await page.goto('/signin?interaction=abc123', { waitUntil: 'commit' });
+    await page.waitForURL(complete('abc123'), { waitUntil: 'commit' });
     expect(await uses(device)).toBe(before); // the passkey wasn't used
   });
 

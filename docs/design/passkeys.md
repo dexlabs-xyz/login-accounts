@@ -75,6 +75,51 @@ never an empty one, because the password manager hides anything left out.
 - `web3` 1.x (pulled in by Railgun's proof library) is **not** in the browser
   bundle; it is install-time only. Install scripts are disabled (`.npmrc`).
 
+### Deposit flow ("Add money"), agreed 2026-11-05
+
+1. User picks what to send (token and chain from Tidepool's list).
+2. The browser derives a fresh Sepolia address from the recovery phrase on the
+   **standard Ethereum path `m/44'/60'/0'/0/i`** (not Railgun's ephemeral
+   addresses), so any standard wallet can recover deposits from the phrase.
+3. The browser asks Tidepool for a quote to that address (directly, never via
+   Login), the user sends, and the browser polls the status.
+4. Test USDT arrives; the testnet-only gas faucet adds gas (see exceptions).
+5. The fresh address approves and shields into the private balance.
+6. Interrupted deposits resume: "You have a deposit to finish".
+
+- **Deposit records live on the device only**, encrypted with a key derived
+  from the root secret; a new device rebuilds them by scanning derived addresses.
+- **Refunds:** EVM origins refund to the user's own derived address on the
+  sending chain; Solana refunds to the Solana wallet the user sends from.
+- **Sending chains for the hackathon:** Ethereum, Base and Arbitrum Sepolia,
+  plus Solana devnet.
+- **Built 2026-11-05** (`apps/web/src/deposits/`, `railgun/deposits.ts`). Details:
+  - Approves exactly the deposit amount to Railgun, never an unlimited allowance.
+  - Every Tidepool response is checked: the destination must be our verified
+    USDT contract, the quote must echo our recipient, token and refund address,
+    and amounts and addresses must be well-formed.
+  - Quotes never paid expire 10 minutes after their deadline.
+  - Verified end to end on live Sepolia + Tidepool (e2e/deposit.spec.ts):
+    1 USDC on Ethereum Sepolia arrives as 0.99 private USDT in about 2.5 minutes,
+    with the leak test covering deposit keys and all third-party traffic.
+  - Direct deposits for USDT already on Sepolia (no swap; the user's wallet is
+    visibly the funder on-chain, which the screen says).
+  - Proof of Innocence results are fetched on unlock, on Retry and every minute
+    while funds are pending (the SDK doesn't do it by itself). Confirmed
+    manually 2026-11-05: a deposit from the team lead's own wallet went from
+    "being checked" to **Spendable** (4.97 USDT from 5 USDC).
+  - Measured clearing time for a fresh deposit on Sepolia: 52 and 74 minutes
+    (two runs, 2026-11-05). The screen says "up to about an hour and a half".
+    The wallet's 15-minute idle lock (D5) can fire while a user waits; the
+    balance catches up on the next unlock.
+  - Private send verified end to end 2026-11-05 (`e2e/send.spec.ts`): proof
+    in the browser, submitted by a Railgun broadcaster that paid the gas
+    (tx `0xaea9f7a3…b8738`, sent from the broadcaster's address, not the
+    user's). Broadcaster transactions on Ethereum must be gas Type 1; the SDK's
+    `getEVMGasTypeForTransaction` picks it. Railgun charges 0.25% to shield and
+    0.25% to unshield (read from the Sepolia contract); private sends pay only
+    the broadcaster's fee.
+
 ### Smart accounts
 
 The private balance sits in Railgun and is controlled by Railgun keys, not a
@@ -88,11 +133,42 @@ the gas to shield, so EIP-7702 delegation or a paymaster is the likely answer.
 **Decided (2026-11-04): a fresh deposit address for every deposit**, so deposits
 can't be linked to each other on-chain. They are numbered addresses derived from
 the same root secret, so they need no extra backup and the user never sees them.
+**Testnet balance: Tidepool's test USDT on Sepolia** (checked 2026-11-04 against
+Tidepool's live `/v0/tokens`; an earlier reading of its examples wrongly
+suggested only USDC). Matches the team rule (USDT), so no rule change needed.
+
 **Decided (2026-11-04): gas for a fresh deposit address comes with the deposit.**
-Tidepool delivers a small amount of Sepolia ETH to the same fresh address
+NEAR Intents delivers a small amount of native ETH to the same fresh address
 alongside the token, so the address pays its own shielding gas. No Login-run
 gas sponsor (it would see every deposit address and its timing). Cost: a second
-swap fee per deposit.
+swap fee per deposit. **Open for testnet:** Tidepool can't deliver native
+Sepolia ETH (its ETH exists only on the NEAR side), so this works on mainnet
+but not yet on Sepolia.
+
+## Testnet-only exceptions (must NOT reach mainnet)
+
+### Login testnet gas faucet: contradicts D6
+
+**Decided 2026-11-05 (team lead).** Tidepool can't deliver native Sepolia ETH, so
+on testnet a fresh deposit address has no gas to shield its USDT. For the
+hackathon only, a small Login server endpoint sends a little Sepolia ETH to the
+fresh address just before a deposit.
+
+**Why it contradicts D6:** Login's server sees each deposit address and when it
+was requested, by a signed-in user. That is exactly the identity-to-wallet link
+D6 says the server must never have. On-chain, every Login deposit address is also
+funded by the same faucet address, which marks it as a Login deposit.
+
+**Limits while it exists:**
+- Refuses to run on any chain except Sepolia (checks the RPC's chain ID on every send).
+- Off unless its key is configured; the key is testnet-only and lives only in `.env`.
+- Stores nothing: no database rows, no logs of addresses, no analytics. Rate
+  limits are in memory and keyed by user ID only.
+- Labelled as a testnet simulation in code, README and the demo.
+
+**Mainnet design (unchanged):** NEAR Intents delivers a little native ETH to the
+same fresh address alongside the token. No Login gas sponsor. Delete this
+faucet before any mainnet work.
 
 ## Verifying external contracts
 
@@ -128,6 +204,16 @@ check and record:
 - **Fit:** built for unshield / cross-contract calls run by broadcasters and
   shielding the base token (ETH). It does **not**, as shipped in the SDK, let a
   fresh address shield an ERC-20 without someone paying its gas.
+
+### Tidepool test USDT (Sepolia `0x650F12bA31777DE8Ded47287a8CC86bE737646fe`), checked 2026-11-04
+
+- "Tidepool Testnet USDT (no value)", 6 decimals, ~2.6 KB, not a proxy.
+- Has an owner (`0x55F2c8044D790e1b8369508c31c756c0c2Ca0E93`) and `mint`;
+  minting by anyone else reverts ("not minter"). Tidepool controls supply via
+  its faucet. No transfer fee, blacklist or pause functions found.
+- Not yet compared against published source (explorers unreachable from our tools).
+- Tidepool itself is community-run and testnet-only (not affiliated with
+  NEAR); its responses are untrusted input.
 
 ## Open flags (don't lose these)
 

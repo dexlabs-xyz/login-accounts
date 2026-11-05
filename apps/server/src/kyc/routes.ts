@@ -199,6 +199,13 @@ export function kycRoutes({
    * its applicant ID, and the browser passes it here so the server can poll.
    * With webhooks, the ID arrives in a signed webhook instead, and this route
    * is refused.
+   *
+   * KNOWN LIMIT: the server trusts the applicant ID the browser sends. A user
+   * could claim someone else's applicant ID (if they knew it) and copy that
+   * person's level. That's acceptable only because this route exists just in
+   * local polling mode. Any real deployment must set SUMSUB_WEBHOOK_SECRET,
+   * which turns this route off. Do not enable polling mode outside local
+   * development.
    */
   app.post('/api/kyc/applicant', async (c) => {
     const s = session(c);

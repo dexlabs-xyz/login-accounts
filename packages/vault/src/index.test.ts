@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closeVault, createVault, deriveKeyMaterial, DERIVED_KEY_LABELS, openVault, wrapForPasskey, VaultError } from './index.ts';
+import { closeVault, createVault, deriveKeyMaterial, DERIVED_KEY_LABELS, openJson, openVault, sealJson, wrapForPasskey, VaultError } from './index.ts';
 
 // Stand-ins for what two different passkeys' PRF extension would return.
 const prfA = () => new Uint8Array(32).fill(1);
@@ -111,5 +111,34 @@ describe('deriveKeyMaterial', () => {
 
   it('refuses a root secret of the wrong size', async () => {
     await expect(deriveKeyMaterial(new Uint8Array(16), DERIVED_KEY_LABELS.railgunDbKey)).rejects.toThrow();
+  });
+});
+
+describe('sealJson / openJson (deposit records)', () => {
+  const key = () => new Uint8Array(32).fill(9);
+
+  it('round-trips a value', async () => {
+    const value = { records: [{ index: 0, address: '0xabc', status: 'shielded' }] };
+    expect(await openJson(key(), 'deposits', await sealJson(key(), 'deposits', value))).toEqual(value);
+  });
+
+  it('keeps the plaintext out of the sealed output', async () => {
+    const sealed = JSON.stringify(await sealJson(key(), 'deposits', { address: '0xSECRETADDRESS' }));
+    expect(sealed).not.toContain('SECRETADDRESS');
+  });
+
+  it('fails closed on the wrong key, wrong purpose, or tampering', async () => {
+    const sealed = await sealJson(key(), 'deposits', { a: 1 });
+    await expect(openJson(new Uint8Array(32).fill(1), 'deposits', sealed)).rejects.toMatchObject({ code: 'decrypt-failed' });
+    await expect(openJson(key(), 'something-else', sealed)).rejects.toMatchObject({ code: 'decrypt-failed' });
+    const flipped = { ...sealed, ct: (sealed.ct.startsWith('A') ? 'B' : 'A') + sealed.ct.slice(1) };
+    await expect(openJson(key(), 'deposits', flipped)).rejects.toMatchObject({ code: 'decrypt-failed' });
+  });
+
+  it('the deposit-records key is separate from the Railgun DB key', async () => {
+    const root = new Uint8Array(32).fill(7);
+    const a = await deriveKeyMaterial(root, DERIVED_KEY_LABELS.depositRecordsKey);
+    const b = await deriveKeyMaterial(root, DERIVED_KEY_LABELS.railgunDbKey);
+    expect(a).not.toEqual(b);
   });
 });

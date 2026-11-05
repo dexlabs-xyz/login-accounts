@@ -60,3 +60,5 @@ code { font-family: ui-monospace, monospace; }
 .add-passkey { display: grid; gap: 0.5rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
 .add-passkey .row { justify-content: flex-start; align-items: center; }
 .address { overflow-wrap: anywhere; }
+select { font: inherit; padding: 0.7rem 0.8rem; border-radius: 0.6rem; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+h3 { margin: 0.5rem 0 0; }

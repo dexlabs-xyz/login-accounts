@@ -1,5 +1,5 @@
 import { expect, type CDPSession, type Page } from '@playwright/test';
-import { Mnemonic } from 'ethers';
+import { HDNodeWallet, Mnemonic } from 'ethers';
 import { DERIVED_KEY_LABELS, deriveKeyMaterial } from '../packages/vault/src/index.ts';
 
 /**
@@ -115,8 +115,9 @@ export async function signOut(page: Page) {
  * Records every secret the page handles, so tests can prove none of them ever
  * leaves the device: PRF outputs (from getClientExtensionResults), the
  * plaintext the vault encrypts (the root secret), the root secret transferred to
- * the Railgun worker, and the recovery phrase and Railgun DB key the worker
- * derives from it (recomputed here). Checks every request, including
+ * the Railgun worker, and what the worker derives from it (recomputed here):
+ * the recovery phrase, the Railgun DB key, the deposit-records key and the
+ * private keys of the first deposit addresses. Checks every request, including
  * the worker's, plus browser storage. Test-only instrumentation; the app
  * itself exposes nothing.
  */
@@ -165,8 +166,14 @@ export async function recordSecrets(page: Page) {
       const phrases: string[] = [];
       for (const h of secrets.filter((x) => x.length === 64)) {
         const root = new Uint8Array(Buffer.from(h, 'hex'));
-        phrases.push(Mnemonic.fromEntropy(root).phrase);
+        const phrase = Mnemonic.fromEntropy(root).phrase;
+        phrases.push(phrase);
         secrets.push(Buffer.from(await deriveKeyMaterial(root, DERIVED_KEY_LABELS.railgunDbKey)).toString('hex'));
+        secrets.push(Buffer.from(await deriveKeyMaterial(root, DERIVED_KEY_LABELS.depositRecordsKey)).toString('hex'));
+        // Private keys of the first deposit addresses (m/44'/60'/0'/0/i).
+        for (let i = 0; i < 5; i++) {
+          secrets.push(HDNodeWallet.fromPhrase(phrase, undefined, `m/44'/60'/0'/0/${i}`).privateKey.slice(2));
+        }
       }
       const stored = await page.evaluate(async () => ({
         local: JSON.stringify({ ...localStorage }),

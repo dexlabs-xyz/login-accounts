@@ -11,6 +11,7 @@
     "@login/vault": "*",
     "@railgun-community/engine": "9.9.1",
     "@railgun-community/shared-models": "8.2.1",
+    "@railgun-community/waku-broadcaster-client-web": "10.0.1",
     "@railgun-community/wallet": "11.2.0",
     "@simplewebauthn/browser": "14.0.0",
     "@sumsub/websdk": "2.9.1",

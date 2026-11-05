@@ -3,6 +3,10 @@ import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
 import { KycCard } from './Kyc.tsx';
 import { privateWallet } from './railgun/client.ts';
+import { SEPOLIA_USDT, SEPOLIA_WETH, USDT_DECIMALS } from './railgun/protocol.ts';
+import { AddMoney } from './deposits/AddMoney.tsx';
+import { SendPrivately } from './send/SendPrivately.tsx';
+import { formatUnits } from './deposits/tidepool.ts';
 import {
   addPasskey,
   connectPasskey,
@@ -108,6 +112,21 @@ const BUCKET_LABELS: Record<string, string> = {
 };
 
 /** Private balance from the Railgun wallet (Sepolia testnet). Shown only while unlocked. */
+/** Known tokens in the private balance. TESTNET addresses (Sepolia). */
+const KNOWN_TOKENS: Record<string, { key: string; label: string; decimals: number }> = {
+  [SEPOLIA_USDT.toLowerCase()]: { key: 'usdt', label: 'USDT', decimals: USDT_DECIMALS },
+  [SEPOLIA_WETH.toLowerCase()]: { key: 'eth', label: 'ETH (for network fees)', decimals: 18 },
+};
+const tokenKey = (address: string) => KNOWN_TOKENS[address.toLowerCase()]?.key ?? 'other';
+const tokenLabel = (address: string) => {
+  const t = KNOWN_TOKENS[address.toLowerCase()];
+  return t ? <strong>{t.label}</strong> : <code>{address.slice(0, 8)}…</code>;
+};
+const tokenAmount = (address: string, amount: string) => {
+  const t = KNOWN_TOKENS[address.toLowerCase()];
+  return t ? formatUnits(amount, t.decimals, t.decimals === 18 ? 5 : 2) : amount;
+};
+
 /** How long a sync may show no progress before we say so and offer a retry. */
 const SYNC_STALL_MS = 45_000;
 
@@ -186,9 +205,10 @@ function PrivateBalance() {
           <ul className="passkeys">
             {rows.map((r) => (
               <li key={r.bucket + r.tokenAddress}>
-                <code>{r.tokenAddress.slice(0, 8)}…</code>
-                <span>
-                  {r.amount} <span className="muted small">({BUCKET_LABELS[r.bucket] ?? r.bucket})</span>
+                {tokenLabel(r.tokenAddress)}
+                <span data-testid={`balance-${r.bucket}-${tokenKey(r.tokenAddress)}`}>
+                  {tokenAmount(r.tokenAddress, r.amount)}{' '}
+                  <span className="muted small">({BUCKET_LABELS[r.bucket] ?? r.bucket})</span>
                 </span>
               </li>
             ))}
@@ -387,14 +407,17 @@ function SignInHandoff() {
   const valid = INTERACTION_ID.test(interaction);
   const [state, setState] = useState<'checking' | 'sign-in' | 'leaving'>('checking');
 
-  const complete = useCallback(() => {
+  // Leave exactly once: a second redirect would cancel the first (React runs
+  // effects twice in development, and callbacks can race).
+  const left = useRef(false);
+  const leave = useCallback((path: string) => {
+    if (left.current) return;
+    left.current = true;
     setState('leaving');
-    location.assign(`/oidc/interaction/${interaction}/complete`);
-  }, [interaction]);
-  const cancel = () => {
-    setState('leaving');
-    location.assign(`/oidc/interaction/${interaction}/abort?reason=cancelled`);
-  };
+    location.assign(path);
+  }, []);
+  const complete = useCallback(() => leave(`/oidc/interaction/${interaction}/complete`), [leave, interaction]);
+  const cancel = () => leave(`/oidc/interaction/${interaction}/abort?reason=cancelled`);
 
   useEffect(() => {
     if (!valid) return;
@@ -523,6 +546,20 @@ function Account({
       </section>
 
       {me.hasVault && open && <PrivateBalance />}
+      {me.hasVault && open && (
+        <SendPrivately
+          confirmWithPasskey={async () => {
+            try {
+              const o = await unlock(me);
+              return o.kind === 'opened';
+            } catch (e) {
+              setError(explain(e));
+              return false;
+            }
+          }}
+        />
+      )}
+      {me.hasVault && open && <AddMoney />}
 
       {atRisk && (
         <section className="warning" role="alert">

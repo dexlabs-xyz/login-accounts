@@ -6,8 +6,25 @@
  * through Login. This screen only ever shows a level and a pass/fail state.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import snsWebSdk from '@sumsub/websdk';
 import { api, ApiError } from './api.ts';
+
+/**
+ * The Sumsub SDK is third-party code, and this page also unlocks the wallet.
+ * So it's never bundled into the page: it loads only after the user presses
+ * Continue to start a verification.
+ */
+type SnsWebSdk = typeof import('@sumsub/websdk').default;
+let sdkModule: Promise<SnsWebSdk> | null = null;
+function loadSumsubSdk(): Promise<SnsWebSdk> {
+  sdkModule ??= import('@sumsub/websdk').then(
+    (m) => m.default,
+    (err: unknown) => {
+      sdkModule = null; // let a later Continue try again
+      throw err;
+    },
+  );
+  return sdkModule;
+}
 
 type Level = 'L1' | 'L2' | 'L3';
 type AttemptState = 'in-progress' | 'in-review' | 'passed' | 'retry' | 'final';
@@ -96,7 +113,7 @@ export function KycCard() {
   const [error, setError] = useState('');
   const container = useRef<HTMLDivElement>(null);
   const sdk = useRef<{ destroy(): void } | null>(null);
-  const [widget, setWidget] = useState<{ level: Level; token: string; polling: boolean } | null>(null);
+  const [widget, setWidget] = useState<{ level: Level; token: string; polling: boolean; sdk: SnsWebSdk } | null>(null);
 
   const load = useCallback(async (refresh = false) => {
     try {
@@ -138,7 +155,15 @@ export function KycCard() {
     try {
       const first = await api<{ token: string } & KycView>('POST', '/api/kyc/start', { level });
       setView(first);
-      setWidget({ level, token: first.token, polling: first.available && first.mode === 'polling' });
+      let sdk: SnsWebSdk;
+      try {
+        sdk = await loadSumsubSdk();
+      } catch {
+        setError('The verification window couldn’t load. Check your connection and try again.');
+        setStage('idle');
+        return;
+      }
+      setWidget({ level, token: first.token, polling: first.available && first.mode === 'polling', sdk });
       setStage('widget');
     } catch (e) {
       setError(explainKyc(e));
@@ -151,7 +176,7 @@ export function KycCard() {
   // Starts the Sumsub widget once its container is on screen.
   useEffect(() => {
     if (stage !== 'widget' || !widget || !container.current) return;
-    const { level, token, polling } = widget;
+    const { level, token, polling, sdk: snsWebSdk } = widget;
     const instance = snsWebSdk
       .init(token, async () => (await api<{ token: string }>('POST', '/api/kyc/start', { level })).token)
       .withConf({ lang: 'en', theme: 'light' })

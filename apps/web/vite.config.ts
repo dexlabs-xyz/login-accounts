@@ -14,6 +14,10 @@ export default defineConfig({
     },
   },
   worker: { format: 'es' },
+  // Scan the Railgun worker's imports at startup too. Otherwise Vite discovers
+  // them on first unlock, rebuilds, and reloads the page, which locks the
+  // wallet (development only).
+  optimizeDeps: { entries: ['index.html', 'src/railgun/worker.ts'] },
   server: {
     host: '127.0.0.1', // IPv4: VS Code port forwarding connects here (container 'localhost' is IPv6-only)
     port: 5180,
