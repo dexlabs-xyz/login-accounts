@@ -75,6 +75,25 @@ never an empty one, because the password manager hides anything left out.
 - `web3` 1.x (pulled in by Railgun's proof library) is **not** in the browser
   bundle; it is install-time only. Install scripts are disabled (`.npmrc`).
 
+### Deposit flow ("Add money"), agreed 2026-11-05
+
+1. User picks what to send (token and chain from Tidepool's list).
+2. The browser derives a fresh Sepolia address from the recovery phrase on the
+   **standard Ethereum path `m/44'/60'/0'/0/i`** (not Railgun's ephemeral
+   addresses), so any standard wallet can recover deposits from the phrase.
+3. The browser asks Tidepool for a quote to that address (directly, never via
+   Login), the user sends, and the browser polls the status.
+4. Test USDT arrives; the testnet-only gas faucet adds gas (see exceptions).
+5. The fresh address approves and shields into the private balance.
+6. Interrupted deposits resume: "You have a deposit to finish".
+
+- **Deposit records live on the device only**, encrypted with a key derived
+  from the root secret; a new device rebuilds them by scanning derived addresses.
+- **Refunds:** EVM origins refund to the user's own derived address on the
+  sending chain; Solana refunds to the Solana wallet the user sends from.
+- **Sending chains for the hackathon:** Ethereum, Base and Arbitrum Sepolia,
+  plus Solana devnet.
+
 ### Smart accounts
 
 The private balance sits in Railgun and is controlled by Railgun keys, not a
