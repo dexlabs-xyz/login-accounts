@@ -8,6 +8,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { privateWallet } from '../railgun/client.ts';
 import { SEPOLIA_USDC, USDC_DECIMALS, USDT_DECIMALS, type DepositRecord } from '../railgun/protocol.ts';
 import { depositProgress, resumeAll, startDeposit, startEvmDeposit, track, type Stage } from './flow.ts';
+import { mainnetPriceCheck, type MainnetPrice } from './mainnet.ts';
 import {
   CHAIN_NAMES,
   formatUnits,
@@ -113,6 +114,15 @@ export function AddMoney() {
   const [active, setActive] = useState<{ record: DepositRecord; quote: Quote } | null>(null);
   const [evm, setEvm] = useState<DepositRecord | null>(null);
   const [source, setSource] = useState<'evm' | 'sol' | null>(null);
+  /** Read-only mainnet NEAR Intents price check (approved exception); hidden on any error. */
+  const [mainnet, setMainnet] = useState<MainnetPrice | null>(null);
+  useEffect(() => {
+    if (!evm) return;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 10_000);
+    mainnetPriceCheck(ctl.signal).then(setMainnet, () => setMainnet(null)).finally(() => clearTimeout(timer));
+    return () => (ctl.abort(), clearTimeout(timer));
+  }, [evm]);
   const [shieldFeeBp, setShieldFeeBp] = useState<number | null>(null);
 
   useEffect(() => {
@@ -213,6 +223,12 @@ export function AddMoney() {
             to pay future network fees. Gas is covered on testnet. On-chain, the wallet you send from is visible as this
             address’s funder. The address is yours and stays open for 24 hours.
           </p>
+          {mainnet && (
+            <p className="small muted" data-testid="mainnet-price">
+              On mainnet today, NEAR Intents swaps {mainnet.usdcIn} USDC into <strong>{mainnet.usdtOut} USDT</strong>
+              {mainnet.seconds ? ` in about ${mainnet.seconds} seconds` : ''}. Live price check only: nothing is sent.
+            </p>
+          )}
           <p role="status" className="info" data-testid="active-deposit-status">
             {stageText(depositProgress.get(evm.index), pw.deposits.find((d) => d.index === evm.index) ?? evm)}
           </p>

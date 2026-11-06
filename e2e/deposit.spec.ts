@@ -61,6 +61,8 @@ test('EVM: ETH and USDC sent to one address → swapped through Tidepool → pri
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
   expect(to).toMatch(/^0x[0-9a-fA-F]{40}$/);
   await expect(add.getByText('Only these three tokens')).toBeVisible();
+  // Read-only mainnet NEAR Intents price check (approved exception): shown, nothing sent.
+  await expect(add.getByTestId('mainnet-price')).toContainText('nothing is sent', { timeout: 20_000 });
 
   // The user sends ETH and USDC back to back.
   const ethTx = await sender.sendTransaction({ to, value: parseUnits('0.003', 18) });
@@ -78,7 +80,7 @@ test('EVM: ETH and USDC sent to one address → swapped through Tidepool → pri
   await expect(card.getByTestId(/fee-reserve-(pending|ready)/)).toBeVisible({ timeout: 300_000 });
 
   // Nothing secret left the device (Tidepool, faucet, RPC, Railgun traffic).
-  expect(leaks.hosts()).toEqual(expect.arrayContaining(['www.usetidepool.tech', 'ethereum-sepolia-rpc.publicnode.com']));
+  expect(leaks.hosts()).toEqual(expect.arrayContaining(['www.usetidepool.tech', 'ethereum-sepolia-rpc.publicnode.com', '1click.chaindefuser.com']));
   await leaks.assertNoLeaks();
 });
 

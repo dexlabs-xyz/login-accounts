@@ -209,6 +209,27 @@ funded by the same faucet address, which marks it as a Login deposit.
 same fresh address alongside the token. No Login gas sponsor. Delete this
 faucet before any mainnet work.
 
+### Mainnet NEAR Intents price check: an exception to "testnet only"
+
+**Approved 2026-11-05 (team lead), built 2026-11-06.** The hackathon rules
+suggest showing mainnet NEAR Intents with `dry: true` quotes, and no NEAR
+Intents testnet exists. So the Ethereum deposit screen shows one line: what
+mainnet 1Click (`1click.chaindefuser.com`) would give for 100 USDC → USDT now.
+Code: `apps/web/src/deposits/mainnet.ts`.
+
+**Limits:**
+- `dry: true` only: no deposit address is created, nothing can be sent. A
+  "dry" answer that includes a deposit address is treated as an error.
+- A fixed placeholder address (`0x…dEaD`) and a fixed example amount; never a
+  user's address or amount.
+- Called from the browser, never through Login's server; no API key (checked:
+  none needed for dry quotes; CORS allows it). The browser's IP is visible to
+  the mainnet service, as with any web request.
+- Never blocks the deposit: on any error, timeout (10 s) or implausible price
+  the line is simply not shown.
+
+**Never** extend this to non-dry quotes, real deposit addresses or real funds.
+
 ## Verifying external contracts
 
 Using established contracts doesn't mean trusting them blindly. Before Login
