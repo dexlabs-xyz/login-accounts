@@ -27,3 +27,22 @@ export function ethToSwap(p: { balanceWei: bigint; userEthWei: bigint; reserveWe
   const swap = available < p.userEthWei ? available : p.userEthWei;
   return swap >= MIN_ETH_SWAP_WEI ? swap : 0n;
 }
+
+/** Tidepool caps native ETH at 0.006 ETH per swap (6 Nov 2026), including swaps from ETH. */
+export const MAX_ETH_SWAP_WEI = 6_000_000_000_000_000n;
+
+/**
+ * Splits an ETH amount into swaps Tidepool accepts: at most MAX_ETH_SWAP_WEI
+ * each. A final remainder below MIN_ETH_SWAP_WEI isn't swapped; it stays as
+ * gas and joins the fee reserve.
+ */
+export function ethSwapChunks(totalWei: bigint): bigint[] {
+  const chunks: bigint[] = [];
+  let left = totalWei;
+  while (left >= MIN_ETH_SWAP_WEI) {
+    const chunk = left > MAX_ETH_SWAP_WEI ? MAX_ETH_SWAP_WEI : left;
+    chunks.push(chunk);
+    left -= chunk;
+  }
+  return chunks;
+}

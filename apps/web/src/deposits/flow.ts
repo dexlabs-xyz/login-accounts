@@ -10,7 +10,7 @@
 import { api } from '../api.ts';
 import { privateWallet } from '../railgun/client.ts';
 import { SEPOLIA_WETH, type DepositRecord, type DepositSwap } from '../railgun/protocol.ts';
-import { ethToSwap, MIN_ETH_SWAP_WEI } from './plan.ts';
+import { ethSwapChunks, ethToSwap, MIN_ETH_SWAP_WEI } from './plan.ts';
 import { formatUnits, getQuote, getStatus, isFinal, loadTokens, type Quote, type SwapStatus, type Token } from './tidepool.ts';
 
 /** Enough Sepolia ETH for approve + shield. Below this we ask the testnet faucet. */
@@ -366,7 +366,13 @@ async function finishEvm(index: number) {
   const ethSwapped = swaps.filter((s) => s.token === 'ETH' && s.status !== 'refunded').reduce((t, s) => t + BigInt(s.amountIn), 0n);
   const userEth = BigInt(record.userEthWei ?? '0') - ethSwapped;
   const eth = ethToSwap({ balanceWei: BigInt(bal.eth), userEthWei: userEth > 0n ? userEth : 0n, reserveWei: feeReserveWei() });
-  if (eth > 0n && !swaps.some((s) => s.token === 'ETH' && s.status === 'failed')) await newSwap('ETH', eth);
+  // Tidepool caps each ETH swap (0.006 ETH), so larger amounts go in several swaps, one after another.
+  if (!swaps.some((s) => s.token === 'ETH' && s.status === 'failed')) {
+    for (const chunk of ethSwapChunks(eth)) {
+      await newSwap('ETH', chunk);
+      if (swaps[swaps.length - 1]!.status !== 'success') break; // refunded or failed: stop, the rest stays here
+    }
+  }
 
   // Tidepool reports success when it sends; wait until the USDT is visible here.
   if (swaps.some((s) => s.status === 'success')) {

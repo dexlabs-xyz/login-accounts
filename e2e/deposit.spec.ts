@@ -131,3 +131,46 @@ test('Solana devnet: asks for a refund address, then gets a Solana deposit addre
   await expect(add.getByText(/Send exactly .* USDC/)).toBeVisible();
   await expect(add.getByText('Solana devnet', { exact: true })).toBeVisible();
 });
+
+test('EVM: more ETH than Tidepool takes in one swap (0.006) is split into several swaps', async ({ page }) => {
+  const provider = new JsonRpcProvider(RPC);
+  const log = (m: string) => console.log(`[eth-split] ${m}`);
+
+  await Device.add(page);
+  await signUp(page);
+  const card = page.getByRole('region', { name: /Private balance/ });
+  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+
+  // Three throwaway senders, each with 0.004 ETH from our testnet faucet (testnet only).
+  const senders = [0, 1, 2].map(() => Wallet.createRandom().connect(provider));
+  for (const s of senders) expect((await page.request.post('/api/testnet-gas', { data: { address: s.address } })).ok()).toBe(true);
+  for (const s of senders) {
+    await expect.poll(async () => (await provider.getBalance(s.address)) >= parseUnits('0.004', 18), { timeout: 180_000, intervals: [5_000] }).toBe(true);
+  }
+
+  const add = page.getByRole('region', { name: /Add money/ });
+  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
+
+  // 3 x 0.0039 = 0.0117 ETH. After 0.001 gas and a 0.001 fee reserve, ~0.0097 is swapped: 0.006 + ~0.0037.
+  const txs = await Promise.all(senders.map((s) => s.sendTransaction({ to, value: parseUnits('0.0039', 18) })));
+  await Promise.all(txs.map((t) => t.wait(1)));
+  log(`sent 0.0117 ETH to ${to}`);
+
+  const status = add.getByTestId('active-deposit-status');
+  const seen: string[] = [];
+  await expect
+    .poll(async () => {
+      const t = (await status.textContent()) ?? '';
+      if (t !== seen[seen.length - 1]) log(`status: ${t}`), seen.push(t);
+      return t;
+    }, { timeout: 15 * 60_000, intervals: [2_000] })
+    .toMatch(/^Done\./);
+  // Two separate ETH swaps happened: 2 swap transfers + approve + shield + fee-reserve shield = at least 5
+  // transactions from the deposit address (a single swap would make 4).
+  const sent = await provider.getTransactionCount(to);
+  log(`transactions sent by the deposit address: ${sent}`);
+  expect(sent).toBeGreaterThanOrEqual(5);
+  await expect(card.getByText('USDT')).toBeVisible({ timeout: 300_000 });
+  log(`private balance: ${(await card.innerText()).replace(/\n+/g, ' | ').slice(-160)}`);
+});
