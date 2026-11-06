@@ -3,10 +3,10 @@
  * public Sepolia address). Same steps for both: review, confirm with passkey,
  * proof, broadcaster. TESTNET ONLY.
  */
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { privateWallet } from '../railgun/client.ts';
 import { SEPOLIA_USDT, USDT_DECIMALS } from '../railgun/protocol.ts';
-import { formatUnits, toUnits } from '../deposits/tidepool.ts';
+import { formatUnits, loadTokens, toUnits } from '../deposits/tidepool.ts';
 
 type Kind = 'transfer' | 'unshield';
 
@@ -20,7 +20,7 @@ const ERRORS: Record<string, string> = {
   'own-deposit-address':
     'That’s one of your own Login deposit addresses. It’s publicly linked to your deposits, so withdrawing there would undo the privacy. Use a different address.',
   'insufficient-usdt': 'You don’t have that much spendable USDT. Deposits become spendable once their privacy check clears.',
-  'insufficient-fee-balance': 'Not enough private ETH for the network fee. Your next deposit adds some automatically.',
+  'insufficient-fee-balance': 'Your network-fee reserve is empty, so this can’t be sent yet. Your next deposit refills it automatically.',
   'no-broadcaster': 'No network relay is available right now. Try again in a minute.',
   'fee-too-high': 'The network fee quoted is unusually high, so we stopped. Try again later.',
   'quote-expired': 'The fee quote expired. Review it again.',
@@ -32,8 +32,17 @@ const explain = (e: unknown, kind: Kind) =>
   (e instanceof Error && ERRORS[e.message]) ||
   (kind === 'transfer' ? 'The send didn’t go through. Nothing was sent.' : 'The withdrawal didn’t go through. Nothing was sent.');
 
-/** Sepolia gas is nearly free, so show enough digits that a real fee never reads as 0. */
-const formatFee = (wei: string) => (BigInt(wei) < 1_000_000_000n ? '< 0.000000001' : formatUnits(wei, 18, 9));
+/**
+ * One currency on screen: the fee is paid from the hidden ETH reserve (testnet),
+ * shown as USDT at Tidepool's ETH price. Without a price, say it's covered.
+ */
+function feeInUsdt(wei: string, ethPrice: number | null): string {
+  if (ethPrice === null) return 'covered by your network-fee reserve';
+  const usdt = (Number(BigInt(wei)) / 1e18) * ethPrice;
+  return usdt < 0.01 ? 'less than 0.01 USDT' : `about ${usdt.toFixed(2)} USDT`;
+}
+let ethPricePromise: Promise<number | null> | null = null;
+const ethPrice = () => (ethPricePromise ??= loadTokens().then((t) => t.ethPrice, () => ((ethPricePromise = null), null)));
 const usdt = (units: string) => formatUnits(units, USDT_DECIMALS, 6);
 const short = (a: string) => `${a.slice(0, 14)}…${a.slice(-8)}`;
 
@@ -99,6 +108,10 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
   };
   // The SDK reports progress per proof stage, so it can restart at 0. Never show it going back.
   const shownProgress = useRef(0);
+  const [price, setPrice] = useState<number | null>(null);
+  useEffect(() => {
+    void ethPrice().then(setPrice);
+  }, []);
   const copy = COPY[kind];
   const headingId = `${kind}-h`;
 
@@ -204,8 +217,8 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
             </>
           )}
           <p className="small">
-            Network fee: <strong>{formatFee(step.feeWei)} ETH</strong>, paid from your private ETH balance to the relay that
-            submits it. Quote valid until {new Date(step.expiresAt).toLocaleTimeString()}.
+            Network fee: <strong>{feeInUsdt(step.feeWei, price)}</strong>, paid to the relay that submits it. Quote valid until{' '}
+            {new Date(step.expiresAt).toLocaleTimeString()}.
           </p>
           <div className="row">
             <button className="primary" onClick={() => void send(step)}>

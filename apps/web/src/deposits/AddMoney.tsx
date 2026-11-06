@@ -1,8 +1,13 @@
-/** "Add money": deposit from another chain into the private balance. TESTNET ONLY. */
+/**
+ * "Add money": into the private balance, always as USDT. TESTNET ONLY.
+ *   - From an Ethereum wallet: our own fresh address on Ethereum Sepolia; send
+ *     USDT, USDC or ETH, any amount (USDC and ETH are swapped through Tidepool).
+ *   - From Solana: Tidepool's own deposit address (team decision, 6 Nov).
+ */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { privateWallet } from '../railgun/client.ts';
 import { SEPOLIA_USDC, USDC_DECIMALS, USDT_DECIMALS, type DepositRecord } from '../railgun/protocol.ts';
-import { depositProgress, resumeAll, startDeposit, track, type Stage } from './flow.ts';
+import { depositProgress, resumeAll, startDeposit, startEvmDeposit, track, type Stage } from './flow.ts';
 import {
   CHAIN_NAMES,
   formatUnits,
@@ -23,8 +28,12 @@ function useProgress() {
   useSyncExternalStore(depositProgress.subscribe, depositProgress.version);
 }
 
-/** USDC sent to a USDT deposit address by mistake: say so, and where it goes. */
+/** USDC that ended up in the private balance as USDC: say so. */
 function usdcNote(record: DepositRecord): string | null {
+  if (record.quote?.anyToken) {
+    const refunded = record.swaps?.some((s) => s.token === 'USDC' && (s.status === 'refunded' || s.status === 'failed'));
+    return refunded ? 'Tidepool couldn’t swap your USDC into USDT, so it went into your private balance as USDC.' : null;
+  }
   const shielded = record.shieldedTokens?.find((t) => t.token.toLowerCase() === SEPOLIA_USDC.toLowerCase())?.amount;
   const seen = shielded ?? depositProgress.usdc(record.index);
   if (!seen) return null;
@@ -47,10 +56,22 @@ function stageText(stage: Stage | undefined, record: DepositRecord): string {
     }[stage.swap];
   }
   switch (stage?.kind) {
+    case 'waiting-evm':
+      return 'Waiting for USDT, USDC or ETH to arrive at your deposit address…';
+    case 'swapping':
+      return {
+        PENDING_DEPOSIT: `Swapping your ${stage.token} into USDT…`,
+        KNOWN_DEPOSIT_TX: `Swapping your ${stage.token} into USDT…`,
+        PROCESSING: `Swapping your ${stage.token} into USDT…`,
+        SUCCESS: `Swapped your ${stage.token} into USDT.`,
+        INCOMPLETE_DEPOSIT: `Swapping your ${stage.token} into USDT…`,
+        REFUNDED: `Tidepool couldn’t swap your ${stage.token}; it was returned to your deposit address.`,
+        FAILED: `The ${stage.token} swap failed.`,
+      }[stage.swap];
     case 'waiting-direct':
       return 'Waiting for your USDT to arrive at your deposit address…';
     case 'arriving':
-      return 'USDT arriving at your deposit address…';
+      return record.quote?.anyToken ? 'Arrived at your deposit address…' : 'USDT arriving at your deposit address…';
     case 'adding-gas':
       return 'Adding testnet gas (Login testnet faucet)…';
     case 'shielding':
@@ -90,6 +111,8 @@ export function AddMoney() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [active, setActive] = useState<{ record: DepositRecord; quote: Quote } | null>(null);
+  const [evm, setEvm] = useState<DepositRecord | null>(null);
+  const [source, setSource] = useState<'evm' | 'sol' | null>(null);
   const [shieldFeeBp, setShieldFeeBp] = useState<number | null>(null);
 
   useEffect(() => {
@@ -129,6 +152,24 @@ export function AddMoney() {
     }
   };
 
+  const startEvm = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      setEvm(await startEvmDeposit());
+    } catch (e) {
+      setError(e instanceof Error && e.message !== 'Error' ? e.message : 'Couldn’t start the deposit. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const reset = () => {
+    setActive(null);
+    setEvm(null);
+    setSource(null);
+  };
+  const copy = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
+
   const history = [...pw.deposits].filter((d) => d.status !== 'new').reverse();
 
   return (
@@ -137,12 +178,56 @@ export function AddMoney() {
         Add money <span className="badge">Testnet</span>
       </h2>
       <p className="muted small">
-        Send tokens from another chain. They arrive as USDT in your private balance. Uses Tidepool, a community testnet for
-        NEAR Intents.
+        Whatever you send arrives as USDT in your private balance. Swaps use Tidepool, a community testnet for NEAR Intents.
       </p>
       {loadError && <p className="error" role="alert">Couldn’t reach Tidepool: {loadError}</p>}
 
-      {!active && tokens && (
+      {!active && !evm && !source && (
+        <div className="row" role="group" aria-label="Where are you sending from?">
+          <button className="primary" disabled={busy} onClick={() => (setSource('evm'), void startEvm())}>
+            {busy ? 'Creating your address…' : 'From an Ethereum wallet'}
+          </button>
+          <button onClick={() => setSource('sol')}>From Solana</button>
+        </div>
+      )}
+
+      {evm && (
+        <div className="stack" aria-label="Deposit instructions">
+          <p>
+            Send <strong>USDT, USDC or ETH</strong> on <strong>Ethereum Sepolia</strong> to this address, any amount:
+          </p>
+          <div className="row">
+            <code className="address" data-testid="tidepool-deposit-address">
+              {evm.address}
+            </code>
+            <button className="link" onClick={() => copy(evm.address)}>
+              Copy
+            </button>
+          </div>
+          <p className="warning small">
+            Only these three tokens, and only on Ethereum Sepolia. Other tokens or networks won’t arrive in your balance.
+          </p>
+          <p className="small muted">
+            It all becomes private USDT: USDC and ETH are swapped at Tidepool’s rate, and Railgun keeps{' '}
+            {shieldFeeBp !== null ? `${shieldFeeBp / 100}%` : 'a small fee'} as money enters the private pool. A little ETH is kept
+            to pay future network fees. Gas is covered on testnet. On-chain, the wallet you send from is visible as this
+            address’s funder. The address is yours and stays open for 24 hours.
+          </p>
+          <p role="status" className="info" data-testid="active-deposit-status">
+            {stageText(depositProgress.get(evm.index), pw.deposits.find((d) => d.index === evm.index) ?? evm)}
+          </p>
+          {usdcNote(pw.deposits.find((d) => d.index === evm.index) ?? evm) && (
+            <p className="warning small" data-testid="active-deposit-usdc-note">
+              {usdcNote(pw.deposits.find((d) => d.index === evm.index) ?? evm)}
+            </p>
+          )}
+          <button className="link" onClick={reset}>
+            Start another deposit
+          </button>
+        </div>
+      )}
+
+      {source === 'sol' && !active && tokens && (
         <form className="stack" onSubmit={(e) => (e.preventDefault(), void submit())}>
           <label>
             Send from
@@ -151,7 +236,6 @@ export function AddMoney() {
               {tokens.origins.map((t) => (
                 <option key={t.assetId} value={t.assetId}>
                   {t.symbol} on {CHAIN_NAMES[t.blockchain as OriginChain]}
-                  {t.assetId === tokens.usdt.assetId ? ' (direct, no swap)' : ''}
                 </option>
               ))}
             </select>
@@ -167,9 +251,14 @@ export function AddMoney() {
               {solanaRefund && !solanaOk && <span className="error small">That isn’t a Solana address.</span>}
             </label>
           )}
-          <button type="submit" className="primary" disabled={busy || !units || !solanaOk}>
-            {busy ? 'Getting a quote…' : 'Get deposit address'}
-          </button>
+          <div className="row">
+            <button type="submit" className="primary" disabled={busy || !units || !solanaOk}>
+              {busy ? 'Getting a quote…' : 'Get deposit address'}
+            </button>
+            <button type="button" className="link" onClick={reset}>
+              Back
+            </button>
+          </div>
         </form>
       )}
 
@@ -186,7 +275,7 @@ export function AddMoney() {
             <code className="address" data-testid="tidepool-deposit-address">
               {active.quote.depositAddress}
             </code>
-            <button className="link" onClick={() => void navigator.clipboard.writeText(active.quote.depositAddress)}>
+            <button className="link" onClick={() => copy(active.quote.depositAddress)}>
               Copy
             </button>
           </div>
@@ -216,7 +305,7 @@ export function AddMoney() {
               {usdcNote(active.record)}
             </p>
           )}
-          <button className="link" onClick={() => setActive(null)}>
+          <button className="link" onClick={reset}>
             Start another deposit
           </button>
         </div>
@@ -235,7 +324,11 @@ export function AddMoney() {
                 <li key={d.index}>
                   <div>
                     <strong>
-                      {d.quote ? `${d.quote.amountInFormatted || d.quote.amountIn} ${d.quote.originSymbol} from ${CHAIN_NAMES[d.quote.originChain as OriginChain]}` : `Deposit #${d.index + 1}`}
+                      {d.quote?.anyToken
+                        ? `Deposit on Ethereum Sepolia`
+                        : d.quote
+                          ? `${d.quote.amountInFormatted || d.quote.amountIn} ${d.quote.originSymbol} from ${CHAIN_NAMES[d.quote.originChain as OriginChain]}`
+                          : `Deposit #${d.index + 1}`}
                     </strong>
                     <div className="muted small" data-testid={`deposit-${d.index}-status`}>
                       {stageText(stage, d)}

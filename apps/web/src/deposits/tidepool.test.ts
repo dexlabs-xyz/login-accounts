@@ -1,6 +1,6 @@
 /** Tidepool is untrusted: these checks are what stop a bad response from redirecting a deposit. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SEPOLIA_USDT } from '../railgun/protocol.ts';
+import { SEPOLIA_USDC, SEPOLIA_USDT } from '../railgun/protocol.ts';
 import { formatUnits, getQuote, getStatus, isValidAddress, loadTokens, toUnits, type Token } from './tidepool.ts';
 
 const usdt: Token = { assetId: 'nep141:eth-usdt', blockchain: 'eth', symbol: 'USDT', decimals: 6, contractAddress: SEPOLIA_USDT };
@@ -20,11 +20,28 @@ const ask = () => getQuote({ origin: usdc, usdt, amount: '5000000', recipient: M
 afterEach(() => vi.unstubAllGlobals());
 
 describe('tokens', () => {
-  it('accepts the verified Sepolia USDT', async () => {
-    mockFetch([usdt, usdc, { ...usdc, blockchain: 'polygon' }]);
+  const sepUsdc: Token = { assetId: 'nep141:eth-usdc', blockchain: 'eth', symbol: 'USDC', decimals: 6, contractAddress: SEPOLIA_USDC };
+  const sepEth: Token = { assetId: 'nep141:eth', blockchain: 'eth', symbol: 'ETH', decimals: 18, price: 2240.26 };
+  const solUsdc: Token = { assetId: 'nep141:sol-usdc', blockchain: 'sol', symbol: 'USDC', decimals: 6 };
+
+  it('accepts the verified Sepolia USDT; only Solana goes through Tidepool’s own deposit address', async () => {
+    mockFetch([usdt, usdc, sepUsdc, sepEth, solUsdc, { ...usdc, blockchain: 'polygon' }]);
     const r = await loadTokens();
     expect(r.usdt.contractAddress).toBe(SEPOLIA_USDT);
-    expect(r.origins.map((t) => t.blockchain)).toEqual(['eth', 'base']); // unsupported chains filtered out
+    expect(r.origins.map((t) => t.blockchain)).toEqual(['sol']); // EVM deposits use our own address
+    expect(r.sepolia?.usdc.contractAddress).toBe(SEPOLIA_USDC);
+    expect(r.sepolia?.eth.assetId).toBe('nep141:eth');
+    expect(r.ethPrice).toBe(2240.26);
+  });
+  it('won’t swap from a Sepolia USDC that isn’t the contract we checked, or an ETH with a contract', async () => {
+    mockFetch([usdt, { ...sepUsdc, contractAddress: '0x9999999999999999999999999999999999999999' }, sepEth]);
+    expect((await loadTokens()).sepolia).toBeNull();
+    mockFetch([usdt, sepUsdc, { ...sepEth, contractAddress: '0x9999999999999999999999999999999999999999' }]);
+    expect((await loadTokens()).sepolia).toBeNull();
+  });
+  it('ignores a nonsense ETH price (it only labels fees)', async () => {
+    mockFetch([usdt, sepUsdc, { ...sepEth, price: -1 }]);
+    expect((await loadTokens()).ethPrice).toBeNull();
   });
   it('refuses if Tidepool’s USDT is a different contract than the one we checked', async () => {
     mockFetch([{ ...usdt, contractAddress: '0x9999999999999999999999999999999999999999' }]);

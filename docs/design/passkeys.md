@@ -75,7 +75,38 @@ never an empty one, because the password manager hides anything left out.
 - `web3` 1.x (pulled in by Railgun's proof library) is **not** in the browser
   bundle; it is install-time only. Install scripts are disabled (`.npmrc`).
 
-### Deposit flow ("Add money"), agreed 2026-11-05
+### Deposit flow, revised 2026-11-06: "EVM or Solana", always private USDT
+
+Decided by the team lead after real testing showed the token picker was too
+easy to get wrong (USDC sent to a USDT address sat unnoticed overnight).
+
+- **Add money → "From an Ethereum wallet" or "From Solana".** No token picker.
+- **EVM:** one fresh address of ours (same derivation as below) on Ethereum
+  Sepolia. The user sends **USDT, USDC or ETH, any amount**. The deposit
+  address then: shields USDT as is; swaps USDC to USDT through Tidepool (the
+  USDT comes back to the same address, refunds too), then shields; swaps the
+  ETH the user sent to USDT, keeping 0.001 ETH for its own gas and topping up
+  a 0.001 ETH hidden fee reserve (rule in `apps/web/src/deposits/plan.ts`,
+  unit-tested). Testnet-faucet gas is never swapped. Every swap step is saved
+  in the deposit record before the next, so a reload never sends twice. A
+  refunded USDC swap is shielded as private USDC rather than lost.
+- **One currency on screen.** The private balance never lists ETH: a line says
+  network fees are covered. Fees on Send and Withdraw are shown in USDT at
+  Tidepool's ETH price. (Testnet only: Sepolia broadcasters take ETH. On
+  mainnet they take USDT, so no reserve is needed.)
+- **Solana:** unchanged, through Tidepool's own deposit address (no Solana
+  keys of our own: that would need new crypto libraries).
+- **Dropped:** Base and Arbitrum Sepolia. Our address only operates on
+  Ethereum Sepolia.
+- **Privacy trade-off (accepted):** the sending wallet is now visibly the
+  funder of the deposit address for every EVM deposit. Before, a USDC deposit
+  went to Tidepool's address and Tidepool delivered to ours. Small in
+  practice: the shield into Railgun is public anyway, and matching amounts
+  could already link the two.
+- **Late or mistaken money:** finished or timed-out deposit addresses are
+  re-checked on unlock; anything new gets a "Finish deposit" button.
+
+### Deposit flow ("Add money"), agreed 2026-11-05 (superseded above for EVM)
 
 1. User picks what to send (token and chain from Tidepool's list).
 2. The browser derives a fresh Sepolia address from the recovery phrase on the

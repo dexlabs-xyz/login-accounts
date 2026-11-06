@@ -12,6 +12,8 @@ export const SEPOLIA_USDC = '0x2e6AD9E6D59bB4585ea0E6762c3b637dde29DAD2';
 export const USDC_DECIMALS = 6;
 /** Railgun's wrapped ETH on Sepolia (from Railgun's network config): pays broadcaster fees. TESTNET ONLY. */
 export const SEPOLIA_WETH = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14';
+/** ETH a deposit address always keeps for its own remaining transactions (swap transfers, approve, shield). */
+export const DEPOSIT_ETH_GAS_KEEP_WEI = 1_000_000_000_000_000n; // 0.001 ETH
 
 export type DepositStatus =
   | 'new' // fresh address reserved, no quote yet
@@ -35,6 +37,25 @@ export interface DepositQuote {
   refundTo: string;
   /** No swap: the user sends USDT on Sepolia straight to the fresh address. */
   direct?: boolean;
+  /**
+   * EVM deposit (Ethereum Sepolia): the user sends USDT, USDC or ETH, any amount,
+   * to the fresh address. USDC and ETH are swapped to USDT through Tidepool,
+   * back to the same address, then everything is shielded as USDT.
+   */
+  anyToken?: boolean;
+}
+
+/** One swap a deposit address makes through Tidepool (USDC or ETH into USDT). */
+export interface DepositSwap {
+  token: 'USDC' | 'ETH';
+  /** Smallest units of the token sent to Tidepool. */
+  amountIn: string;
+  /** Tidepool's one-time deposit address for this swap. */
+  tidepoolDepositAddress: string;
+  minUsdt: string;
+  /** Our transfer to Tidepool, once sent. */
+  sendTx?: string;
+  status: 'quoted' | 'sent' | 'success' | 'refunded' | 'failed';
 }
 
 export interface DepositRecord {
@@ -49,6 +70,10 @@ export interface DepositRecord {
   feeShieldTx?: string;
   /** What the shield moved in, per token (set by the worker). Can include USDC sent by mistake. */
   shieldedTokens?: { token: string; amount: string }[];
+  /** EVM deposits: ETH the user sent (before any testnet gas), in wei. Only this is ever swapped. */
+  userEthWei?: string;
+  /** EVM deposits: swaps into USDT, in order. Kept so a reload never sends twice. */
+  swaps?: DepositSwap[];
   createdAt: number;
   updatedAt: number;
 }
@@ -59,6 +84,7 @@ export type DepositMethod =
   | 'deposit.update'
   | 'deposit.balances'
   | 'deposit.shield'
+  | 'deposit.transfer'
   | 'deposit.rescan'
   | 'fees'
   | 'send.quote'

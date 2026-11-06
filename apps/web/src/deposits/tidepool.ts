@@ -7,7 +7,7 @@
  * checked before we act on it (team rule). The API base is one setting, so the
  * same calls can point at official 1Click later.
  */
-import { SEPOLIA_USDT } from '../railgun/protocol.ts';
+import { SEPOLIA_USDC, SEPOLIA_USDT } from '../railgun/protocol.ts';
 
 export const TIDEPOOL_API = 'https://www.usetidepool.tech';
 /** Chains we accept deposits from for the hackathon. */
@@ -26,6 +26,14 @@ export interface Token {
   symbol: string;
   decimals: number;
   contractAddress?: string;
+  /** USD price Tidepool reports. Untrusted; only used to show fees in USDT. */
+  price?: number;
+}
+
+/** Tokens an EVM deposit address can swap into USDT on Ethereum Sepolia. */
+export interface SepoliaSwapTokens {
+  usdc: Token;
+  eth: Token;
 }
 
 export type SwapStatus =
@@ -65,7 +73,7 @@ async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pr
 }
 
 /** The deposit destination: Tidepool's test USDT on Ethereum Sepolia. Must match our checked token. */
-export async function loadTokens(): Promise<{ usdt: Token; origins: Token[] }> {
+export async function loadTokens(): Promise<{ usdt: Token; origins: Token[]; sepolia: SepoliaSwapTokens | null; ethPrice: number | null }> {
   const tokens = await call<Token[]>('GET', '/v0/tokens');
   if (!Array.isArray(tokens)) throw new TidepoolError('Unexpected token list.');
   const usdt = tokens.find((t) => t.blockchain === 'eth' && t.symbol === 'USDT');
@@ -73,14 +81,31 @@ export async function loadTokens(): Promise<{ usdt: Token; origins: Token[] }> {
     // Never deliver to a token we haven't checked.
     throw new TidepoolError('Tidepool’s Sepolia USDT is not the token we verified.');
   }
+  // Solana deposits go through Tidepool's own deposit address (team decision, 6 Nov).
+  // EVM deposits use our own fresh address instead (see `sepolia` below).
   const origins = tokens.filter(
     (t) =>
-      (ORIGIN_CHAINS as readonly string[]).includes(t.blockchain) &&
+      t.blockchain === 'sol' &&
       ['USDC', 'USDT', 'SOL'].includes(t.symbol) &&
       Number.isInteger(t.decimals) &&
       typeof t.assetId === 'string',
   );
-  return { usdt, origins };
+  // Swap sources for EVM deposits: only the USDC we verified, and native ETH (no contract).
+  const usdc = tokens.find((t) => t.blockchain === 'eth' && t.symbol === 'USDC');
+  const eth = tokens.find((t) => t.blockchain === 'eth' && t.symbol === 'ETH');
+  const sepolia =
+    usdc &&
+    usdc.contractAddress?.toLowerCase() === SEPOLIA_USDC.toLowerCase() &&
+    usdc.decimals === 6 &&
+    eth &&
+    eth.decimals === 18 &&
+    !eth.contractAddress &&
+    typeof usdc.assetId === 'string' &&
+    typeof eth.assetId === 'string'
+      ? { usdc, eth }
+      : null;
+  const ethPrice = typeof eth?.price === 'number' && Number.isFinite(eth.price) && eth.price > 0 ? eth.price : null;
+  return { usdt, origins, sepolia, ethPrice };
 }
 
 export interface Quote {

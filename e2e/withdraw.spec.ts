@@ -30,7 +30,7 @@ test('withdraws USDT to a public address; refuses own deposit addresses', async 
   const recipient = Wallet.createRandom().address; // throwaway, testnet only
   await toField.fill(recipient);
   await panel.getByRole('button', { name: 'Review' }).click();
-  await expect(panel.getByText(/Network fee: [<\d].* ETH/)).toBeVisible({ timeout: 120_000 });
+  await expect(panel.getByText(/Network fee: (less than|about|covered)/)).toBeVisible({ timeout: 120_000 });
   await expect(panel.getByRole('note')).toContainText('This part is public.');
   // 0.25% of 1 USDT, read from the contract.
   await expect(panel.getByTestId('withdraw-receives')).toHaveText('0.9975 USDT');

@@ -17,9 +17,17 @@ import {
   populateShieldBaseToken,
 } from '@railgun-community/wallet';
 import { EVMGasType, NETWORK_CONFIG, NetworkName, TXIDVersion } from '@railgun-community/shared-models';
-import { Contract, HDNodeWallet, JsonRpcProvider, keccak256, type Provider } from 'ethers';
+import { Contract, HDNodeWallet, JsonRpcProvider, getAddress, isAddress, keccak256, ZeroAddress, type Provider } from 'ethers';
 import { openJson, sealJson, type Bytes, type SealedJson } from '@login/vault';
-import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, type DepositRecord, type DepositStatus } from './protocol.ts';
+import {
+  DEPOSIT_ETH_GAS_KEEP_WEI,
+  SEPOLIA_USDC,
+  SEPOLIA_USDT,
+  SEPOLIA_WETH,
+  type DepositRecord,
+  type DepositStatus,
+  type DepositSwap,
+} from './protocol.ts';
 
 const NETWORK = NetworkName.EthereumSepolia;
 const RAILGUN_PROXY = NETWORK_CONFIG[NETWORK].proxyContract;
@@ -31,6 +39,7 @@ if (NETWORK_CONFIG[NETWORK].baseToken.wrappedAddress.toLowerCase() !== SEPOLIA_W
 const MIN_FEE_SHIELD_WEI = 500_000_000_000_000n;
 const ERC20 = [
   'function balanceOf(address) view returns (uint256)',
+  'function transfer(address,uint256) returns (bool)',
   'function allowance(address,address) view returns (uint256)',
   'function approve(address,uint256) returns (bool)',
 ];
@@ -159,10 +168,54 @@ export function createDeposits(ctx: DepositContext) {
 
     /** Page-side progress (quote taken, delivered, refunded...). Only these fields can change here. */
     async update(params: unknown) {
-      const { index, status, quote } = params as { index: number; status?: DepositStatus; quote?: DepositRecord['quote'] };
+      const { index, status, quote, userEthWei, swaps } = params as {
+        index: number;
+        status?: DepositStatus;
+        quote?: DepositRecord['quote'];
+        userEthWei?: string;
+        swaps?: DepositSwap[];
+      };
       const allowed: DepositStatus[] = ['awaiting-delivery', 'delivered', 'refunded', 'failed'];
       if (status && !allowed.includes(status)) throw new Error('Status not allowed from the page.');
-      return patch(index, { ...(status ? { status } : {}), ...(quote ? { quote } : {}) });
+      if (userEthWei !== undefined && !/^\d+$/.test(userEthWei)) throw new Error('Bad amount.');
+      return patch(index, {
+        ...(status ? { status } : {}),
+        ...(quote ? { quote } : {}),
+        ...(userEthWei !== undefined ? { userEthWei } : {}),
+        ...(swaps ? { swaps } : {}),
+      });
+    },
+
+    /**
+     * EVM deposits: send this deposit address's USDC or ETH to a Tidepool swap
+     * address (the swap brings USDT back to the same address). Never more than
+     * the address holds; for ETH, never so much that it can't pay for its own
+     * remaining transactions.
+     */
+    async transfer(params: unknown) {
+      const { index, token, to, amount: amountText } = params as { index: number; token: string; to: string; amount: string };
+      const r = (await load()).find((x) => x.index === index);
+      if (!r) throw new Error('Unknown deposit.');
+      if (typeof to !== 'string' || !isAddress(to) || getAddress(to) === ZeroAddress || getAddress(to) === getAddress(r.address)) {
+        throw new Error('Bad destination.');
+      }
+      if (typeof amountText !== 'string' || !/^\d+$/.test(amountText) || BigInt(amountText) === 0n) throw new Error('Bad amount.');
+      const amount = BigInt(amountText);
+      const wallet = HDNodeWallet.fromPhrase(ctx.mnemonic, undefined, pathFor(index)).connect(provider);
+      if (token === 'ETH') {
+        if ((await provider.getBalance(wallet.address)) < amount + DEPOSIT_ETH_GAS_KEEP_WEI) throw new Error('Not enough ETH.');
+        const tx = await wallet.sendTransaction({ to: getAddress(to), value: amount });
+        await tx.wait(1);
+        return { txHash: tx.hash };
+      }
+      if (token === 'USDC') {
+        const c = usdc.connect(wallet) as Contract;
+        if (((await c.balanceOf!(wallet.address)) as bigint) < amount) throw new Error('Not enough USDC.');
+        const tx = await c.transfer!(getAddress(to), amount);
+        await tx.wait(1);
+        return { txHash: tx.hash as string };
+      }
+      throw new Error('Unsupported token.');
     },
 
     async balances(params: unknown) {
@@ -193,7 +246,14 @@ export function createDeposits(ctx: DepositContext) {
           DEPOSIT_TOKENS.map(async (t) => ({ ...t, amount: (await t.contract.balanceOf!(wallet.address)) as bigint })),
         )
       ).filter((t) => t.amount > 0n);
-      if (held.length === 0) throw new Error('Nothing to shield yet.');
+      if (held.length === 0) {
+        // EVM deposit of a little ETH only: it all becomes the hidden fee reserve.
+        if ((await provider.getBalance(wallet.address)) < MIN_FEE_SHIELD_WEI) throw new Error('Nothing to shield yet.');
+        await patch(index, { status: 'shielding' });
+        const key = keccak256(await wallet.signMessage(getShieldPrivateKeySignatureMessage()));
+        const feeShieldTx = await shieldLeftoverEth(wallet, key);
+        return patch(index, { status: 'shielded', ...(feeShieldTx ? { feeShieldTx } : {}) });
+      }
       await patch(index, { status: 'shielding' });
 
       let approveTx: string | undefined;

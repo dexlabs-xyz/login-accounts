@@ -142,9 +142,14 @@ function PrivateBalance() {
     return () => clearTimeout(t);
   }, [pw.status, pw.scanProgress]);
   if (pw.status === 'off') return null;
-  const rows = Object.entries(pw.balances)
+  const isReserve = (address: string) => address.toLowerCase() === SEPOLIA_WETH.toLowerCase();
+  const all = Object.entries(pw.balances)
     .filter(([bucket]) => bucket !== 'Spent')
     .flatMap(([bucket, list]) => (list ?? []).filter((t) => t.amount !== '0').map((t) => ({ bucket, ...t })));
+  // One currency on screen: the private ETH that pays network fees (testnet only) is not shown as a balance.
+  const rows = all.filter((r) => !isReserve(r.tokenAddress));
+  const reserve = all.filter((r) => isReserve(r.tokenAddress));
+  const reserveState = reserve.some((r) => r.bucket === 'Spendable') ? 'ready' : reserve.length ? 'pending' : 'empty';
   return (
     <section className="card" aria-labelledby="private-h">
       <h2 id="private-h">
@@ -214,6 +219,15 @@ function PrivateBalance() {
             ))}
           </ul>
         ))}
+      {pw.status === 'ready' && (
+        <p className="muted small" data-testid={`fee-reserve-${reserveState}`}>
+          {reserveState === 'ready'
+            ? 'Network fees are covered.'
+            : reserveState === 'pending'
+              ? 'Network fees: being set up with your deposit (cleared with it).'
+              : 'Your next deposit sets aside a little to cover network fees for sending and withdrawing.'}
+        </p>
+      )}
     </section>
   );
 }

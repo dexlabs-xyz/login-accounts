@@ -28,7 +28,7 @@ test('A sends USDT privately to B through a broadcaster', async ({ page, browser
   await send.getByLabel('To (private 0zk address)').fill(addressB);
   await send.getByLabel('Amount (USDT)').fill('0.5');
   await send.getByRole('button', { name: 'Review' }).click();
-  await expect(send.getByText(/Network fee: [<\d].* ETH/)).toBeVisible({ timeout: 120_000 });
+  await expect(send.getByText(/Network fee: (less than|about|covered)/)).toBeVisible({ timeout: 120_000 });
   say(`review: ${(await send.innerText()).replace(/\n+/g, ' | ').slice(0, 300)}`);
   await send.getByRole('button', { name: 'Confirm with passkey' }).click();
   await watch(page, 'transfer-status', /^Sent /, 10 * 60_000, say);

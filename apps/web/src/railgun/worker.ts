@@ -71,6 +71,27 @@ async function refreshPOIs() {
   }
 }
 
+/**
+ * After a shield we sent, the chain indexer may not have it yet, so one
+ * refresh can miss it, and the once-a-minute loop above only starts once
+ * something pending is visible. So keep refreshing for a while until it shows.
+ */
+const AFTER_SHIELD_REFRESH_MS = 20_000;
+const AFTER_SHIELD_WINDOW_MS = 15 * 60_000;
+let expectIncomingUntil = 0;
+let incomingTimer: ReturnType<typeof setTimeout> | undefined;
+
+function expectIncoming() {
+  expectIncomingUntil = Date.now() + AFTER_SHIELD_WINDOW_MS;
+  clearTimeout(incomingTimer);
+  const tick = async () => {
+    if (!walletId || hasPendingReceive || Date.now() > expectIncomingUntil) return;
+    await refreshBalances(CHAIN, [walletId]).catch(() => {});
+    incomingTimer = setTimeout(tick, AFTER_SHIELD_REFRESH_MS);
+  };
+  incomingTimer = setTimeout(tick, AFTER_SHIELD_REFRESH_MS);
+}
+
 function schedulePOIRefresh() {
   clearTimeout(poiTimer);
   if (!hasPendingReceive) return;
@@ -235,8 +256,11 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
             case 'deposit.shield': {
               const r = await deposits.shield(msg.params);
               if (walletId) void refreshBalances(CHAIN, [walletId]);
+              expectIncoming();
               return r;
             }
+            case 'deposit.transfer':
+              return deposits.transfer(msg.params);
             case 'deposit.rescan':
               return deposits.rescan();
             case 'fees':

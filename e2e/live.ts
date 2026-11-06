@@ -53,10 +53,8 @@ export async function fundedAccount(page: Page, usdt: string, say: (m: string) =
   await expect.poll(async () => ((await token.balanceOf!(funder.address)) as bigint) >= parseUnits(usdt, 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
 
   const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByLabel('Send from').selectOption({ label: 'USDT on Ethereum Sepolia (direct, no swap)' });
-  await add.getByLabel('Amount').fill(usdt);
-  await add.getByRole('button', { name: 'Get deposit address' }).click();
-  const depositTo = (await add.getByTestId('tidepool-deposit-address').textContent())!.trim();
+  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  const depositTo = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
   await (await token.transfer!(depositTo, parseUnits(usdt, 6))).wait(1);
   await watch(page, 'active-deposit-status', /^Done\./, 8 * 60_000, say);
 
@@ -76,7 +74,7 @@ export async function fundedAccount(page: Page, usdt: string, say: (m: string) =
       { timeout: 150 * 60_000, intervals: [30_000] },
     )
     .toBe(true);
-  await expect(card.getByTestId('balance-Spendable-eth')).toBeVisible({ timeout: 10 * 60_000 });
+  await expect(card.getByTestId('fee-reserve-ready')).toBeVisible({ timeout: 10 * 60_000 });
   say(`spendable after ${Math.round((Date.now() - t0) / 1000)}s`);
   return { card, depositTo };
 }

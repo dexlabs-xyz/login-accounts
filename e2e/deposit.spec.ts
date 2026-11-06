@@ -22,75 +22,100 @@ test.beforeEach(async ({ page }, info) => {
   page.on('console', (m) => m.type() === 'error' && /railgun|tidepool/i.test(m.text()) && console.log(`[${info.title}] ${m.text().slice(0, 500)}`));
 });
 
-test('deposit USDC on Ethereum Sepolia → private USDT', async ({ page }) => {
+/** Polls the active deposit's status line until Done, logging each change. */
+async function untilDone(add: import('@playwright/test').Locator, log: (m: string) => void, timeout: number) {
+  const status = add.getByTestId('active-deposit-status');
+  let last = '';
+  await expect
+    .poll(async () => {
+      const t = (await status.textContent()) ?? '';
+      if (t !== last) log(`status: ${(last = t)}`);
+      return t;
+    }, { timeout, intervals: [3_000] })
+    .toMatch(/^Done\./);
+}
+
+test('EVM: ETH and USDC sent to one address → swapped through Tidepool → private USDT only', async ({ page }) => {
   const provider = new JsonRpcProvider(RPC);
   const sender = Wallet.createRandom().connect(provider); // throwaway, testnet only
   const usdc = new Contract(SEPOLIA_USDC, ERC20, sender);
-  const log = (m: string) => console.log(`[deposit] ${m}`);
+  const log = (m: string) => console.log(`[evm] ${m}`);
   const leaks = await recordSecrets(page);
 
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
   await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('fee-reserve-empty')).toBeVisible();
 
-  // The sending wallet: gas from our testnet faucet, test USDC from Tidepool's faucet.
-  const gas = await page.request.post('/api/testnet-gas', { data: { address: sender.address } });
-  expect(gas.ok(), await gas.text()).toBe(true);
+  // The sending wallet: ETH from our testnet faucet, test USDC from Tidepool's faucet.
+  expect((await page.request.post('/api/testnet-gas', { data: { address: sender.address } })).ok()).toBe(true);
   const drip = await page.request.post(`${TIDEPOOL}/v0/faucet`, { data: { chain: 'eth', address: sender.address } });
-  log(`tidepool faucet: ${drip.status()} ${(await drip.text()).slice(0, 200)}`);
-  expect(drip.ok()).toBe(true);
-  await expect.poll(async () => (await provider.getBalance(sender.address)) > 0n, { timeout: 180_000, intervals: [5_000] }).toBe(true);
+  expect(drip.ok(), await drip.text()).toBe(true);
+  await expect.poll(async () => (await provider.getBalance(sender.address)) >= parseUnits('0.0035', 18), { timeout: 180_000, intervals: [5_000] }).toBe(true);
   await expect.poll(async () => ((await usdc.balanceOf!(sender.address)) as bigint) >= parseUnits('1', 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
-  log('sending wallet funded');
 
-  // In the app: Add money → 1 USDC from Ethereum Sepolia.
+  // Add money → From an Ethereum wallet: one address, no token or amount to pick.
   const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByLabel('Send from').selectOption({ label: 'USDC on Ethereum Sepolia' });
-  await add.getByLabel('Amount').fill('1');
-  await add.getByRole('button', { name: 'Get deposit address' }).click();
-  const depositAddress = (await add.getByTestId('tidepool-deposit-address').textContent())!.trim();
-  expect(depositAddress).toMatch(/^0x[0-9a-fA-F]{40}$/);
-  log(`quote ok, paying Tidepool deposit address`);
+  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
+  expect(to).toMatch(/^0x[0-9a-fA-F]{40}$/);
+  await expect(add.getByText('Only these three tokens')).toBeVisible();
 
-  // The user pays from their own wallet.
-  const tx = await usdc.transfer!(depositAddress, parseUnits('1', 6));
-  await tx.wait(1);
-  log(`paid: https://sepolia.etherscan.io/tx/${tx.hash}`);
+  // The user sends ETH and USDC back to back.
+  const ethTx = await sender.sendTransaction({ to, value: parseUnits('0.003', 18) });
+  const usdcTx = await usdc.transfer!(to, parseUnits('1', 6));
+  await Promise.all([ethTx.wait(1), usdcTx.wait(1)]);
+  log(`sent 0.003 ETH + 1 USDC to ${to}`);
 
-  // Swap → gas → shield, all driven by the app.
-  const status = add.getByTestId('active-deposit-status');
-  let last = '';
-  await expect
-    .poll(
-      async () => {
-        const t = (await status.textContent()) ?? '';
-        if (t !== last) log(`status: ${(last = t)}`);
-        return t;
-      },
-      { timeout: 10 * 60_000, intervals: [3_000] },
-    )
-    .toMatch(/^Done\./);
-
-  // The shield transaction is linked, and the USDT shows up in the private balance.
-  await expect(add.getByRole('link', { name: 'View on Sepolia Etherscan' }).first()).toBeVisible();
-  log(`shield tx: ${await add.getByRole('link', { name: 'View on Sepolia Etherscan' }).first().getAttribute('href')}`);
-  await expect(card.getByText('USDT')).toBeVisible({ timeout: 300_000 });
-  // The leftover testnet gas was shielded as WETH, to pay broadcaster fees for private sends.
-  await expect(card.getByText('ETH (for network fees)')).toBeVisible({ timeout: 300_000 });
+  await untilDone(add, log, 15 * 60_000);
   log(`private balance: ${(await card.innerText()).replace(/\n+/g, ' | ').slice(-200)}`);
 
-  // Nothing secret left the device during the whole deposit (Tidepool, faucet, RPC, Railgun traffic).
-  const hosts = leaks.hosts();
-  expect(hosts).toEqual(expect.arrayContaining(['www.usetidepool.tech', 'ethereum-sepolia-rpc.publicnode.com']));
+  // One currency: USDT shows; USDC and ETH don't (ETH is the hidden fee reserve).
+  await expect(card.getByText('USDT')).toBeVisible({ timeout: 300_000 });
+  await expect(card.getByText('USDC')).toHaveCount(0);
+  await expect(card.getByText(/^ETH/)).toHaveCount(0);
+  await expect(card.getByTestId(/fee-reserve-(pending|ready)/)).toBeVisible({ timeout: 300_000 });
+
+  // Nothing secret left the device (Tidepool, faucet, RPC, Railgun traffic).
+  expect(leaks.hosts()).toEqual(expect.arrayContaining(['www.usetidepool.tech', 'ethereum-sepolia-rpc.publicnode.com']));
   await leaks.assertNoLeaks();
+});
+
+test('EVM: USDT sent to the address goes straight in, no swap', async ({ page }) => {
+  const provider = new JsonRpcProvider(RPC);
+  const sender = Wallet.createRandom().connect(provider); // throwaway, testnet only
+  const usdt = new Contract(SEPOLIA_USDT, ERC20, sender);
+  const log = (m: string) => console.log(`[usdt] ${m}`);
+
+  await Device.add(page);
+  await signUp(page);
+  const card = page.getByRole('region', { name: /Private balance/ });
+  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+
+  expect((await page.request.post('/api/testnet-gas', { data: { address: sender.address } })).ok()).toBe(true);
+  expect((await page.request.post(`${TIDEPOOL}/v0/faucet`, { data: { chain: 'eth', address: sender.address } })).ok()).toBe(true);
+  await expect.poll(async () => (await provider.getBalance(sender.address)) > 0n, { timeout: 180_000, intervals: [5_000] }).toBe(true);
+  await expect.poll(async () => ((await usdt.balanceOf!(sender.address)) as bigint) >= parseUnits('2', 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
+
+  const add = page.getByRole('region', { name: /Add money/ });
+  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
+  const tx = await usdt.transfer!(to, parseUnits('2', 6));
+  await tx.wait(1);
+  log(`sent 2 USDT: https://sepolia.etherscan.io/tx/${tx.hash}`);
+
+  await untilDone(add, log, 8 * 60_000);
+  await expect(card.getByText('USDT')).toBeVisible({ timeout: 300_000 });
+  log(`private balance: ${(await card.innerText()).replace(/\n+/g, ' | ').slice(-120)}`);
 });
 
 test('Solana devnet: asks for a refund address, then gets a Solana deposit address', async ({ page }) => {
   await Device.add(page);
   await signUp(page);
   const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByLabel('Send from').selectOption({ label: 'USDC on Solana devnet' }, { timeout: 240_000 });
+  await add.getByRole('button', { name: 'From Solana' }).click({ timeout: 240_000 });
+  await add.getByLabel('Send from').selectOption({ label: 'USDC on Solana devnet' }, { timeout: 60_000 });
   await add.getByLabel('Amount').fill('1');
 
   const refund = add.getByLabel(/Your Solana address/);
@@ -105,45 +130,4 @@ test('Solana devnet: asks for a refund address, then gets a Solana deposit addre
   await expect(add.getByTestId('tidepool-deposit-address')).toHaveText(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, { timeout: 60_000 });
   await expect(add.getByText(/Send exactly .* USDC/)).toBeVisible();
   await expect(add.getByText('Solana devnet', { exact: true })).toBeVisible();
-});
-
-test('direct: USDT on Ethereum Sepolia sent straight to the fresh address → private USDT (no swap)', async ({ page }) => {
-  const provider = new JsonRpcProvider(RPC);
-  const sender = Wallet.createRandom().connect(provider); // throwaway, testnet only
-  const usdt = new Contract(SEPOLIA_USDT, ERC20, sender);
-  const log = (m: string) => console.log(`[direct] ${m}`);
-
-  await Device.add(page);
-  await signUp(page);
-  const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
-
-  expect((await page.request.post('/api/testnet-gas', { data: { address: sender.address } })).ok()).toBe(true);
-  expect((await page.request.post(`${TIDEPOOL}/v0/faucet`, { data: { chain: 'eth', address: sender.address } })).ok()).toBe(true);
-  await expect.poll(async () => (await provider.getBalance(sender.address)) > 0n, { timeout: 180_000, intervals: [5_000] }).toBe(true);
-  await expect.poll(async () => ((await usdt.balanceOf!(sender.address)) as bigint) >= parseUnits('2', 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
-
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByLabel('Send from').selectOption({ label: 'USDT on Ethereum Sepolia (direct, no swap)' });
-  await add.getByLabel('Amount').fill('2');
-  await add.getByRole('button', { name: 'Get deposit address' }).click();
-  await expect(add.getByText('Direct deposit: no swap')).toBeVisible();
-  const to = (await add.getByTestId('tidepool-deposit-address').textContent())!.trim();
-  expect(to).toMatch(/^0x[0-9a-fA-F]{40}$/);
-
-  const tx = await usdt.transfer!(to, parseUnits('2', 6));
-  await tx.wait(1);
-  log(`sent straight to the fresh address: https://sepolia.etherscan.io/tx/${tx.hash}`);
-
-  const status = add.getByTestId('active-deposit-status');
-  let last = '';
-  await expect
-    .poll(async () => {
-      const t = (await status.textContent()) ?? '';
-      if (t !== last) log(`status: ${(last = t)}`);
-      return t;
-    }, { timeout: 8 * 60_000, intervals: [3_000] })
-    .toMatch(/^Done\./);
-  await expect(card.getByText('USDT')).toBeVisible({ timeout: 300_000 });
-  log(`private balance: ${(await card.innerText()).replace(/\n+/g, ' | ').slice(-120)}`);
 });
