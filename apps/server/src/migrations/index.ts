@@ -12,13 +12,15 @@ import { m0001 } from './0001_passkeys_initial.ts';
 import { m0002 } from './0002_passkeys_prf_supported.ts';
 import { m0003 } from './0003_kyc_initial.ts';
 
+import { m0004 } from './0004_oidc_initial.ts';
+
 export interface Migration {
   id: string;
   owner: 'passkeys' | 'oidc' | 'kyc' | 'shared';
   up(db: DB): void;
 }
 
-export const migrations: Migration[] = [m0001, m0002, m0003];
+export const migrations: Migration[] = [m0001, m0002, m0003, m0004];
 
 export function migrate(db: DB, list: Migration[] = migrations): string[] {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)');

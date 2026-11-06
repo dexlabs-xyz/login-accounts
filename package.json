@@ -14,7 +14,9 @@
     "dev": "concurrently -n server,web -c blue,magenta \"npm -w @login/server run dev\" \"npm -w @login/web run dev\"",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "dev:oidc": "concurrently -n server,web,demo \"OIDC_ENABLED=1 npm -w @login/server run dev\" \"npm -w @login/web run dev\" \"npm -w @login/server run dev:oidc-client\"",
+    "test:oidc:browser": "playwright test e2e/oidc.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

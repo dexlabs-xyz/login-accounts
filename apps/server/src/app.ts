@@ -13,8 +13,11 @@ import type { Config } from './config.ts';
 import type { DB } from './db.ts';
 import { ApiError } from './http.ts';
 import type { Mailer, OutboxEmail } from './mail.ts';
+import { createGetKycClaims } from './kyc/claims.ts';
 import { kycRoutes, type KycDeps } from './kyc/routes.ts';
 import { passkeyRoutes } from './passkeys/routes.ts';
+import type { GetKycClaims } from './oidc/contracts.ts';
+import { oidcRoutes } from './oidc/routes.ts';
 import { createSessions } from './passkeys/session.ts';
 import { testnetGasRoutes, type GasSender } from './testnet-gas/routes.ts';
 
@@ -28,6 +31,10 @@ export interface AppDeps {
   now?: () => number;
   /** TESTNET-ONLY gas faucet (contradicts D6; never on mainnet). Null = off. */
   gasSender?: GasSender | null;
+  /** Explicit opt-in for the localhost-only OIDC iteration. */
+  oidcIssuer?: string;
+  /** Adapter supplied by the KYC component when PR #4 and OIDC are combined. */
+  getKycClaims?: GetKycClaims;
 }
 
 export function createApp(deps: AppDeps) {
@@ -50,7 +57,14 @@ export function createApp(deps: AppDeps) {
   );
   app.route('/', testnetGasRoutes({ sessions, sender: deps.gasSender ?? null, now }));
 
-  // OIDC: mount the provider here, e.g. app.route('/', oidcRoutes({ ...deps, getSignedInUser: sessions.getSignedInUser })).
+  const oidcIssuer = deps.oidcIssuer ?? (process.env.OIDC_ENABLED === '1'
+    ? process.env.OIDC_ISSUER ?? 'http://localhost:5180/oidc' : undefined);
+  if (oidcIssuer) {
+    if (deps.config.rpId !== 'localhost') throw new Error('Local OIDC requires the localhost passkey configuration.');
+    // KYC owns the level lookup; OIDC only passes the scopes the user granted (agreed on PR #4).
+    const getKycClaims = deps.getKycClaims ?? createGetKycClaims(deps.db);
+    app.route('/', oidcRoutes({ db: deps.db, sessions, issuer: oidcIssuer, getKycClaims }));
+  }
 
   return { app, sessions };
 }
