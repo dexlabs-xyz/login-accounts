@@ -108,8 +108,9 @@ never an empty one, because the password manager hides anything left out.
     while funds are pending (the SDK doesn't do it by itself). Confirmed
     manually 2026-11-05: a deposit from the team lead's own wallet went from
     "being checked" to **Spendable** (4.97 USDT from 5 USDC).
-  - Measured clearing time for a fresh deposit on Sepolia: 52 and 74 minutes
-    (two runs, 2026-11-05). The screen says "up to about an hour and a half".
+  - Measured clearing time for a fresh deposit on Sepolia: 52 and 74 minutes,
+    and a third run still pending after 90 minutes (2026-11-05). The screen
+    says "usually about an hour, sometimes longer".
     The wallet's 15-minute idle lock (D5) can fire while a user waits; the
     balance catches up on the next unlock.
   - Private send verified end to end 2026-11-05 (`e2e/send.spec.ts`): proof
@@ -119,6 +120,13 @@ never an empty one, because the password manager hides anything left out.
     `getEVMGasTypeForTransaction` picks it. Railgun charges 0.25% to shield and
     0.25% to unshield (read from the Sepolia contract); private sends pay only
     the broadcaster's fee.
+  - Withdraw (unshield) verified by the team lead on 2026-11-06: 0.73 USDT out,
+    0.728175 arrived (0.25% Railgun fee), sent by a broadcaster
+    (tx `0xb5de1b69…a3acb8`). One broadcaster refused with "Could not validate
+    Proof of Innocence"; the app now skips a refusing broadcaster for the
+    session and asks the user to review again, which picked one that worked.
+  - A withdrawal needs private ETH for the broadcaster fee. Accounts funded
+    before the fee balance existed had none; the screen now says so plainly.
 
 ### Smart accounts
 
@@ -214,6 +222,17 @@ check and record:
 - Not yet compared against published source (explorers unreachable from our tools).
 - Tidepool itself is community-run and testnet-only (not affiliated with
   NEAR); its responses are untrusted input.
+
+### Tidepool test USDC (Sepolia `0x2e6AD9E6D59bB4585ea0E6762c3b637dde29DAD2`), checked 2026-11-06
+
+- **Byte-for-byte the same contract code as the USDT above** (same code hash
+  `0xd2722868c4732ee4…`, 2,635 bytes), same owner, EIP-1967 implementation
+  slot empty (not upgradeable). Only name and symbol differ ("Tidepool Testnet
+  USDC (no value)", 6 decimals), which are stored data. The USDT findings apply.
+- Used only for mistakes: USDC sent to a direct-USDT deposit address is shown
+  to the user ("You sent USDC instead of USDT") and shielded as private USDC
+  in the same transaction as any USDT there. Found by the team lead's real
+  test on 2026-11-05, where 5 USDC sat unnoticed at a deposit address overnight.
 
 ## Open flags (don't lose these)
 

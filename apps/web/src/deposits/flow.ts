@@ -28,9 +28,20 @@ export type Stage =
   | { kind: 'done' }
   | { kind: 'refunded' }
   | { kind: 'failed'; reason: string }
-  | { kind: 'needs-finish' };
+  | { kind: 'needs-finish' }
+  /** Money reached a deposit address after its deposit finished (e.g. paid in two parts). */
+  | { kind: 'late-funds' };
 
 const stages = new Map<number, Stage>();
+/** USDC seen at a deposit address (sent instead of USDT), by deposit index. */
+const usdcSeen = new Map<number, string>();
+function noteUsdc(index: number, amount: string) {
+  if (BigInt(amount) > 0n && usdcSeen.get(index) !== amount) {
+    usdcSeen.set(index, amount);
+    version++;
+    listeners.forEach((l) => l());
+  }
+}
 const listeners = new Set<() => void>();
 const running = new Set<number>();
 let version = 0;
@@ -43,6 +54,8 @@ function setStage(index: number, stage: Stage) {
 
 export const depositProgress = {
   get: (index: number) => stages.get(index),
+  /** USDC (in units) seen at this deposit's address, sent instead of USDT. */
+  usdc: (index: number) => usdcSeen.get(index),
   version: () => version,
   subscribe(l: () => void) {
     listeners.add(l);
@@ -124,8 +137,10 @@ export async function track(record: DepositRecord): Promise<void> {
       // Direct: wait for USDT to land at the fresh address itself.
       setStage(record.index, { kind: 'waiting-direct' });
       for (;;) {
-        const bal = await privateWallet.call<{ usdt: string }>('deposit.balances', { index: record.index });
-        if (BigInt(bal.usdt) > 0n) break;
+        const bal = await privateWallet.call<{ usdt: string; usdc: string }>('deposit.balances', { index: record.index });
+        noteUsdc(record.index, bal.usdc);
+        // USDC sent by mistake also counts: it goes in as private USDC.
+        if (BigInt(bal.usdt) > 0n || BigInt(bal.usdc) > 0n) break;
         if (Date.now() > Date.parse(record.quote.deadline)) {
           await privateWallet.call('deposit.update', { index: record.index, status: 'failed' });
           setStage(record.index, { kind: 'failed', reason: 'No USDT arrived within a day. Start a new deposit when you’re ready.' });
@@ -168,12 +183,14 @@ export async function track(record: DepositRecord): Promise<void> {
 /** USDT is at the fresh address: get it gas (testnet faucet) and shield it. */
 async function finish(index: number) {
   setStage(index, { kind: 'arriving' });
-  let bal = await privateWallet.call<{ eth: string; usdt: string }>('deposit.balances', { index });
-  for (let i = 0; BigInt(bal.usdt) === 0n && i < 24; i++) {
+  let bal = await privateWallet.call<{ eth: string; usdt: string; usdc: string }>('deposit.balances', { index });
+  const arrived = () => BigInt(bal.usdt) > 0n || BigInt(bal.usdc) > 0n;
+  for (let i = 0; !arrived() && i < 24; i++) {
     await sleep(POLL_MS);
     bal = await privateWallet.call('deposit.balances', { index });
   }
-  if (BigInt(bal.usdt) === 0n) throw new Error('The USDT hasn’t arrived at your deposit address yet. Try “Finish deposit” again soon.');
+  if (!arrived()) throw new Error('The USDT hasn’t arrived at your deposit address yet. Try “Finish deposit” again soon.');
+  noteUsdc(index, bal.usdc);
 
   if (BigInt(bal.eth) < MIN_GAS_WEI) {
     setStage(index, { kind: 'adding-gas' });
@@ -197,9 +214,27 @@ async function recordAt(index: number) {
   return r;
 }
 
+/** When each finished deposit's address was last checked for money that arrived afterwards. */
+const lateChecked = new Map<number, number>();
+const LATE_CHECK_MS = 5 * 60_000;
+
+/** A finished deposit's address received more USDT or USDC afterwards: offer to move it in. */
+async function checkLate(r: DepositRecord) {
+  const last = lateChecked.get(r.index);
+  if ((last && Date.now() - last < LATE_CHECK_MS) || running.has(r.index)) return;
+  lateChecked.set(r.index, Date.now());
+  try {
+    const bal = await privateWallet.call<{ usdt: string; usdc: string }>('deposit.balances', { index: r.index });
+    if ((BigInt(bal.usdt) > 0n || BigInt(bal.usdc) > 0n) && !running.has(r.index)) setStage(r.index, { kind: 'late-funds' });
+  } catch {
+    // Best effort; checked again on the next unlock.
+  }
+}
+
 /** On unlock: resume deposits still in flight; mark ones that need a tap to finish. */
 export function resumeAll(records: DepositRecord[]) {
   for (const r of records) {
+    if (r.status === 'shielded') void checkLate(r);
     if (r.status === 'awaiting-delivery') void track(r);
     else if ((r.status === 'delivered' || r.status === 'shielding') && !running.has(r.index) && !stages.has(r.index)) {
       setStage(r.index, { kind: 'needs-finish' });

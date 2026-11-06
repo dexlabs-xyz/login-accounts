@@ -19,6 +19,11 @@ export interface PrivateWalletState {
   status: 'off' | 'starting' | 'syncing' | 'ready' | 'needs-poi' | 'error';
   railgunAddress: string | null;
   scanProgress: number;
+  /**
+   * A background re-scan after the first full sync (Railgun re-checks while
+   * deposits clear). The wallet stays 'ready' and usable meanwhile.
+   */
+  refreshing: boolean;
   /** Balances by bucket. Amounts in the token's smallest unit, as strings. */
   balances: Partial<Record<BalanceBucket, { tokenAddress: string; amount: string }[]>>;
   error: string | null;
@@ -32,6 +37,7 @@ const initial: PrivateWalletState = {
   status: 'off',
   railgunAddress: null,
   scanProgress: 0,
+  refreshing: false,
   balances: {},
   error: null,
   deposits: [],
@@ -65,8 +71,12 @@ export const privateWallet = {
       const m = ev.data;
       if (m.type === 'opened') set({ railgunAddress: m.railgunAddress, status: 'syncing' });
       else if (m.type === 'needs-poi') set({ status: 'needs-poi' });
-      else if (m.type === 'scan')
-        set({ scanProgress: m.progress, status: m.status === 'Complete' ? 'ready' : state.status === 'off' ? 'off' : 'syncing' });
+      else if (m.type === 'scan') {
+        // Only the first sync makes the wallet wait. Later re-scans run in the
+        // background: Send and Withdraw stay on screen while they do.
+        if (state.status === 'ready') set({ scanProgress: m.progress, refreshing: m.status !== 'Complete' });
+        else set({ scanProgress: m.progress, status: m.status === 'Complete' ? 'ready' : state.status === 'off' ? 'off' : 'syncing' });
+      }
       else if (m.type === 'balances') set({ balances: { ...state.balances, [m.bucket]: m.erc20 } });
       else if (m.type === 'deposits') set({ deposits: m.records });
       else if (m.type === 'send-progress') set({ sendProgress: m.progress });
@@ -75,8 +85,13 @@ export const privateWallet = {
         pending.delete(m.id);
         if (m.ok) p?.resolve(m.value);
         else {
-          if (import.meta.env.DEV && m.detail) console.error('[railgun worker]', m.detail);
-          p?.reject(new Error(m.error));
+          const err = new Error(m.error);
+          if (import.meta.env.DEV && m.detail) {
+            console.error('[railgun worker]', m.detail);
+            // Development only, so testers can copy it from the screen. Never in production builds.
+            (err as Error & { devDetail?: string }).devDetail = m.detail;
+          }
+          p?.reject(err);
         }
       }
       else if (m.type === 'error') {

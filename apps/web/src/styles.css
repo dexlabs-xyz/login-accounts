@@ -62,3 +62,4 @@ code { font-family: ui-monospace, monospace; }
 .address { overflow-wrap: anywhere; }
 select { font: inherit; padding: 0.7rem 0.8rem; border-radius: 0.6rem; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
 h3 { margin: 0.5rem 0 0; }
+.dev-detail { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; font-size: 0.8rem; background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 0.5rem; padding: 0.6rem; }

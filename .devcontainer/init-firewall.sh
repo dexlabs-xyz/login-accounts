@@ -41,6 +41,7 @@ OPTIONAL_DOMAINS=(
   "ipfs-lb.com"                   # Railgun circuit artifacts + Proof of Innocence list
   "ppoi.fdi.network"              # Railgun Proof of Innocence node (community-run, from Railgun docs)
   "www.usetidepool.tech"          # Tidepool: community-run, testnet-only 1Click-compatible API for NEAR Intents
+  "1click.chaindefuser.com"       # MAINNET NEAR Intents 1Click API: dry (quote-only) price checks, no funds. Approved exception.
   "discovery.rootedinprivacy.com" # Railgun broadcaster network (Waku): peer discovery
   "relay-a.rootedinprivacy.com"   # Railgun broadcaster network: relays
   "relay-b.rootedinprivacy.com"

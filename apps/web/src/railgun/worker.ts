@@ -50,6 +50,7 @@ let sender: ReturnType<typeof createSender> | null = null;
 /** Latest spendable private balances by token (lowercase address), for send checks. */
 const spendable = new Map<string, bigint>();
 let shieldFeeBasisPoints: string | null = null;
+let unshieldFeeBasisPoints: string | null = null;
 
 /**
  * Shields stay "pending" until the wallet fetches their Proof of Innocence
@@ -79,9 +80,16 @@ function schedulePOIRefresh() {
   }, POI_REFRESH_MS);
 }
 
-const errorDetail = (err: unknown) =>
+const errorDetail = (err: unknown) => {
   // Development only, to debug the SDK. Never in production builds.
-  import.meta.env.DEV && err instanceof Error ? `${err.message}\n${err.stack ?? ''}`.slice(0, 1500) : undefined;
+  if (!import.meta.env.DEV || !(err instanceof Error)) return undefined;
+  // Libraries attach the real reason as `cause` (e.g. a broadcaster's refusal).
+  const causes: string[] = [];
+  for (let c: unknown = err.cause, i = 0; c && i < 4; c = (c as { cause?: unknown }).cause, i++) {
+    causes.push(`Caused by: ${c instanceof Error ? c.message : String(c)}`);
+  }
+  return [err.message, ...causes, err.stack ?? ''].join('\n').slice(0, 2000);
+};
 
 // ---------- circuit artifacts, cached in IndexedDB (public files, not secret) ----------
 
@@ -187,6 +195,8 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
         encryptionKey: dbKeyHex,
         rpcUrl: SEPOLIA_RPC,
         spendable: () => spendable,
+        unshieldFeeBasisPoints: () => (unshieldFeeBasisPoints === null ? null : BigInt(unshieldFeeBasisPoints)),
+        ownDepositAddresses: async () => new Set((await deposits!.list()).map((r) => r.address.toLowerCase())),
         onProgress: (progress) => post({ type: 'send-progress', progress }),
       });
 
@@ -201,6 +211,7 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
         15_000,
       );
       shieldFeeBasisPoints = feesSerialized.shieldFeeV2;
+      unshieldFeeBasisPoints = feesSerialized.unshieldFeeV2;
       // Starts this wallet's balance scan (loading the provider alone doesn't).
       await refreshBalances(CHAIN, [info.id]);
       // Fetch any Proof of Innocence results that arrived while the wallet was locked.
@@ -229,7 +240,7 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
             case 'deposit.rescan':
               return deposits.rescan();
             case 'fees':
-              return { shieldFeeBasisPoints };
+              return { shieldFeeBasisPoints, unshieldFeeBasisPoints };
             case 'send.quote':
               if (!sender) throw new Error('Wallet not open.');
               return sender.quote(msg.params);

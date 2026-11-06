@@ -1,7 +1,7 @@
 /** "Add money": deposit from another chain into the private balance. TESTNET ONLY. */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { privateWallet } from '../railgun/client.ts';
-import { USDT_DECIMALS, type DepositRecord } from '../railgun/protocol.ts';
+import { SEPOLIA_USDC, USDC_DECIMALS, USDT_DECIMALS, type DepositRecord } from '../railgun/protocol.ts';
 import { depositProgress, resumeAll, startDeposit, track, type Stage } from './flow.ts';
 import {
   CHAIN_NAMES,
@@ -21,6 +21,17 @@ function useWallet() {
 }
 function useProgress() {
   useSyncExternalStore(depositProgress.subscribe, depositProgress.version);
+}
+
+/** USDC sent to a USDT deposit address by mistake: say so, and where it goes. */
+function usdcNote(record: DepositRecord): string | null {
+  const shielded = record.shieldedTokens?.find((t) => t.token.toLowerCase() === SEPOLIA_USDC.toLowerCase())?.amount;
+  const seen = shielded ?? depositProgress.usdc(record.index);
+  if (!seen) return null;
+  const amount = formatUnits(seen, USDC_DECIMALS, 6);
+  return shielded
+    ? `You sent ${amount} USDC instead of USDT. It went into your private balance as USDC.`
+    : `You sent ${amount} USDC instead of USDT. That’s fine: it’s going into your private balance as USDC.`;
 }
 
 function stageText(stage: Stage | undefined, record: DepositRecord): string {
@@ -45,7 +56,7 @@ function stageText(stage: Stage | undefined, record: DepositRecord): string {
     case 'shielding':
       return 'Moving it into your private balance…';
     case 'done':
-      return 'Done. It’s in your private balance. A privacy check runs first, so it shows as “being checked” for up to about an hour and a half before you can spend it. Your wallet may lock while you wait; the balance catches up when you unlock.';
+      return 'Done. It’s in your private balance. A privacy check runs first, so it shows as “being checked” before you can spend it, usually about an hour, sometimes longer. Your wallet may lock while you wait; the balance catches up when you unlock.';
     case 'refunded':
       return record.quote?.originChain === 'sol'
         ? 'The swap didn’t happen. Your tokens were refunded to your Solana wallet.'
@@ -54,6 +65,8 @@ function stageText(stage: Stage | undefined, record: DepositRecord): string {
       return stage.reason;
     case 'needs-finish':
       return 'This deposit arrived but isn’t in your private balance yet.';
+    case 'late-funds':
+      return 'More money arrived at this deposit address after the deposit finished. Press “Finish deposit” to move it into your private balance.';
   }
   return {
     new: 'Not started.',
@@ -198,6 +211,11 @@ export function AddMoney() {
           <p role="status" className="info" data-testid="active-deposit-status">
             {stageText(depositProgress.get(active.record.index), active.record)}
           </p>
+          {usdcNote(active.record) && (
+            <p className="warning small" data-testid="active-deposit-usdc-note">
+              {usdcNote(active.record)}
+            </p>
+          )}
           <button className="link" onClick={() => setActive(null)}>
             Start another deposit
           </button>
@@ -211,7 +229,8 @@ export function AddMoney() {
           <ul className="passkeys" aria-label="Deposits">
             {history.map((d) => {
               const stage = depositProgress.get(d.index);
-              const canFinish = stage?.kind === 'needs-finish' || (stage?.kind === 'failed' && d.status === 'delivered');
+              const canFinish =
+                stage?.kind === 'needs-finish' || stage?.kind === 'late-funds' || (stage?.kind === 'failed' && d.status === 'delivered');
               return (
                 <li key={d.index}>
                   <div>
@@ -221,6 +240,7 @@ export function AddMoney() {
                     <div className="muted small" data-testid={`deposit-${d.index}-status`}>
                       {stageText(stage, d)}
                     </div>
+                    {usdcNote(d) && <div className="small" data-testid={`deposit-${d.index}-usdc-note`}>{usdcNote(d)}</div>}
                     {d.shieldTx && (
                       <a className="small" href={sepoliaTx(d.shieldTx)} target="_blank" rel="noreferrer">
                         View on Sepolia Etherscan

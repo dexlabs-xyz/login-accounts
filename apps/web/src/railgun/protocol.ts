@@ -3,6 +3,13 @@
 /** Tidepool's test USDT on Ethereum Sepolia (checked 2026-11-04, see docs/design/passkeys.md). TESTNET ONLY. */
 export const SEPOLIA_USDT = '0x650F12bA31777DE8Ded47287a8CC86bE737646fe';
 export const USDT_DECIMALS = 6;
+/**
+ * Tidepool's test USDC on Ethereum Sepolia. Same contract code as the USDT above
+ * (identical code hash, same owner, not upgradeable; checked 2026-11-06). Only
+ * accepted when it lands at a deposit address by mistake. TESTNET ONLY.
+ */
+export const SEPOLIA_USDC = '0x2e6AD9E6D59bB4585ea0E6762c3b637dde29DAD2';
+export const USDC_DECIMALS = 6;
 /** Railgun's wrapped ETH on Sepolia (from Railgun's network config): pays broadcaster fees. TESTNET ONLY. */
 export const SEPOLIA_WETH = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14';
 
@@ -40,6 +47,8 @@ export interface DepositRecord {
   shieldTx?: string;
   /** Leftover ETH shielded as WETH for broadcaster fees. */
   feeShieldTx?: string;
+  /** What the shield moved in, per token (set by the worker). Can include USDC sent by mistake. */
+  shieldedTokens?: { token: string; amount: string }[];
   createdAt: number;
   updatedAt: number;
 }

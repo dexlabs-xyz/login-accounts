@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
 import { privateWallet } from './railgun/client.ts';
-import { SEPOLIA_USDT, SEPOLIA_WETH, USDT_DECIMALS } from './railgun/protocol.ts';
+import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS } from './railgun/protocol.ts';
 import { AddMoney } from './deposits/AddMoney.tsx';
-import { SendPrivately } from './send/SendPrivately.tsx';
+import { SendPrivately, Withdraw } from './send/SendPrivately.tsx';
 import { formatUnits } from './deposits/tidepool.ts';
 import {
   addPasskey,
@@ -114,6 +114,7 @@ const BUCKET_LABELS: Record<string, string> = {
 /** Known tokens in the private balance. TESTNET addresses (Sepolia). */
 const KNOWN_TOKENS: Record<string, { key: string; label: string; decimals: number }> = {
   [SEPOLIA_USDT.toLowerCase()]: { key: 'usdt', label: 'USDT', decimals: USDT_DECIMALS },
+  [SEPOLIA_USDC.toLowerCase()]: { key: 'usdc', label: 'USDC', decimals: USDC_DECIMALS },
   [SEPOLIA_WETH.toLowerCase()]: { key: 'eth', label: 'ETH (for network fees)', decimals: 18 },
 };
 const tokenKey = (address: string) => KNOWN_TOKENS[address.toLowerCase()]?.key ?? 'other';
@@ -480,6 +481,17 @@ function Account({
     void wallet.fingerprint().then(setFp);
   }, [open]);
 
+  /** D5: sends and withdrawals are confirmed with the passkey after the review. */
+  const confirmWithPasskey = async () => {
+    try {
+      const o = await unlock(me);
+      return o.kind === 'opened';
+    } catch (e) {
+      setError(explain(e));
+      return false;
+    }
+  };
+
   const run = async (fn: () => Promise<void>) => {
     setError('');
     setBusy(true);
@@ -545,19 +557,8 @@ function Account({
       </section>
 
       {me.hasVault && open && <PrivateBalance />}
-      {me.hasVault && open && (
-        <SendPrivately
-          confirmWithPasskey={async () => {
-            try {
-              const o = await unlock(me);
-              return o.kind === 'opened';
-            } catch (e) {
-              setError(explain(e));
-              return false;
-            }
-          }}
-        />
-      )}
+      {me.hasVault && open && <SendPrivately confirmWithPasskey={confirmWithPasskey} />}
+      {me.hasVault && open && <Withdraw confirmWithPasskey={confirmWithPasskey} />}
       {me.hasVault && open && <AddMoney />}
 
       {atRisk && (

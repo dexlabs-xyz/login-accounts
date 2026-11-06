@@ -19,7 +19,7 @@ import {
 import { EVMGasType, NETWORK_CONFIG, NetworkName, TXIDVersion } from '@railgun-community/shared-models';
 import { Contract, HDNodeWallet, JsonRpcProvider, keccak256, type Provider } from 'ethers';
 import { openJson, sealJson, type Bytes, type SealedJson } from '@login/vault';
-import { SEPOLIA_USDT, SEPOLIA_WETH, type DepositRecord, type DepositStatus } from './protocol.ts';
+import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, type DepositRecord, type DepositStatus } from './protocol.ts';
 
 const NETWORK = NetworkName.EthereumSepolia;
 const RAILGUN_PROXY = NETWORK_CONFIG[NETWORK].proxyContract;
@@ -70,6 +70,12 @@ async function kv<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReq
 export function createDeposits(ctx: DepositContext) {
   const provider: Provider = new JsonRpcProvider(ctx.rpcUrl);
   const usdt = new Contract(SEPOLIA_USDT, ERC20, provider);
+  // Accepted only because people send it by mistake: it goes in as private USDC.
+  const usdc = new Contract(SEPOLIA_USDC, ERC20, provider);
+  const DEPOSIT_TOKENS = [
+    { address: SEPOLIA_USDT, contract: usdt },
+    { address: SEPOLIA_USDC, contract: usdc },
+  ];
   let cache: DepositRecord[] | null = null;
 
   const addressAt = (index: number) => HDNodeWallet.fromPhrase(ctx.mnemonic, undefined, pathFor(index)).address;
@@ -95,14 +101,15 @@ export function createDeposits(ctx: DepositContext) {
     return r;
   }
 
-  /** Has this address ever been used? Any nonce, ETH or USDT counts. */
+  /** Has this address ever been used? Any nonce, ETH, USDT or USDC counts. */
   async function used(address: string) {
-    const [nonce, eth, tokens] = await Promise.all([
+    const [nonce, eth, a, b] = await Promise.all([
       provider.getTransactionCount(address),
       provider.getBalance(address),
       usdt.balanceOf!(address) as Promise<bigint>,
+      usdc.balanceOf!(address) as Promise<bigint>,
     ]);
-    return nonce > 0 || eth > 0n || tokens > 0n;
+    return nonce > 0 || eth > 0n || a > 0n || b > 0n;
   }
 
   /** Shield (balance - gas for this transaction) of ETH as WETH. Returns the tx hash, or null if too little. */
@@ -162,42 +169,53 @@ export function createDeposits(ctx: DepositContext) {
       const { index } = params as { index: number };
       const r = (await load()).find((x) => x.index === index);
       if (!r) throw new Error('Unknown deposit.');
-      const [eth, tokens] = await Promise.all([provider.getBalance(r.address), usdt.balanceOf!(r.address) as Promise<bigint>]);
-      return { eth: eth.toString(), usdt: tokens.toString() };
+      const [eth, a, b] = await Promise.all([
+        provider.getBalance(r.address),
+        usdt.balanceOf!(r.address) as Promise<bigint>,
+        usdc.balanceOf!(r.address) as Promise<bigint>,
+      ]);
+      return { eth: eth.toString(), usdt: a.toString(), usdc: b.toString() };
     },
 
     /**
      * Move the USDT at a deposit address into the private balance: approve
      * exactly the amount (never unlimited), then shield to this wallet's 0zk
      * address. Both transactions are signed here and paid by the address itself.
+     * USDC sent by mistake goes in too, as private USDC, in the same shield.
      */
     async shield(params: unknown) {
       const { index } = params as { index: number };
       const r = (await load()).find((x) => x.index === index);
       if (!r) throw new Error('Unknown deposit.');
       const wallet = HDNodeWallet.fromPhrase(ctx.mnemonic, undefined, pathFor(index)).connect(provider);
-      const amount = (await usdt.balanceOf!(wallet.address)) as bigint;
-      if (amount === 0n) throw new Error('Nothing to shield yet.');
+      const held = (
+        await Promise.all(
+          DEPOSIT_TOKENS.map(async (t) => ({ ...t, amount: (await t.contract.balanceOf!(wallet.address)) as bigint })),
+        )
+      ).filter((t) => t.amount > 0n);
+      if (held.length === 0) throw new Error('Nothing to shield yet.');
       await patch(index, { status: 'shielding' });
 
-      const token = usdt.connect(wallet) as Contract;
       let approveTx: string | undefined;
-      const allowance = async () => (await token.allowance!(wallet.address, RAILGUN_PROXY)) as bigint;
-      if ((await allowance()) < amount) {
-        const tx = await token.approve!(RAILGUN_PROXY, amount);
-        await tx.wait(1);
-        approveTx = tx.hash as string;
-        // The public RPC balances requests across nodes; one may not have seen
-        // the approval yet. Wait until the allowance is visible before estimating.
-        for (let i = 0; (await allowance()) < amount; i++) {
-          if (i >= 30) throw new Error('Approval not visible yet.');
-          await new Promise((r) => setTimeout(r, 2_000));
+      for (const t of held) {
+        const token = t.contract.connect(wallet) as Contract;
+        const allowance = async () => (await token.allowance!(wallet.address, RAILGUN_PROXY)) as bigint;
+        if ((await allowance()) < t.amount) {
+          const tx = await token.approve!(RAILGUN_PROXY, t.amount);
+          await tx.wait(1);
+          approveTx ??= tx.hash as string;
+          // The public RPC balances requests across nodes; one may not have seen
+          // the approval yet. Wait until the allowance is visible before estimating.
+          for (let i = 0; (await allowance()) < t.amount; i++) {
+            if (i >= 30) throw new Error('Approval not visible yet.');
+            await new Promise((r) => setTimeout(r, 2_000));
+          }
         }
       }
 
       // Railgun derives the shield's encryption key from a signature by the sending address.
       const shieldPrivateKey = keccak256(await wallet.signMessage(getShieldPrivateKeySignatureMessage()));
-      const recipients = [{ tokenAddress: SEPOLIA_USDT, amount, recipientAddress: ctx.railgunAddress }];
+      const recipients = held.map((t) => ({ tokenAddress: t.address, amount: t.amount, recipientAddress: ctx.railgunAddress }));
       const estimate = () =>
         gasEstimateForShield(TXIDVersion.V2_PoseidonMerkle, NETWORK, shieldPrivateKey, recipients, [], wallet.address);
       // One retry: a lagging RPC node can still fail the first estimate.
@@ -214,7 +232,12 @@ export function createDeposits(ctx: DepositContext) {
       });
       const sent = await wallet.sendTransaction(transaction);
       await sent.wait(1);
-      const done = await patch(index, { status: 'shielded', approveTx, shieldTx: sent.hash });
+      const done = await patch(index, {
+        status: 'shielded',
+        approveTx,
+        shieldTx: sent.hash,
+        shieldedTokens: held.map((t) => ({ token: t.address, amount: t.amount.toString() })),
+      });
 
       // Best effort: shield the address's leftover ETH as WETH, so the private
       // balance can pay broadcaster fees for private sends (no public address
