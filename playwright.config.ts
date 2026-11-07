@@ -16,7 +16,8 @@ export default defineConfig({
   webServer: [
     {
       command: 'npm run dev',
-      url: 'http://127.0.0.1:5180',
+      // The API (not just the web app) must be up: it loads Railgun at start-up when the pool is configured.
+      url: 'http://127.0.0.1:8787/api/me',
       env: { DB_PATH: ':memory:', OIDC_ENABLED: '1' },
       reuseExistingServer: false,
       timeout: 60_000,

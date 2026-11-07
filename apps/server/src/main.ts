@@ -6,7 +6,6 @@ import { loadKycConfig } from './kyc/config.ts';
 import { createSumsubClient } from './kyc/sumsub.ts';
 import { devOutboxMailer, resendMailer, type Mailer, type OutboxEmail } from './mail.ts';
 import { ethersGasSender } from './testnet-gas/sender.ts';
-import { railgunTestFundsSender } from './test-funds/sender.ts';
 
 const config = loadConfig();
 const outbox: OutboxEmail[] = [];
@@ -33,8 +32,9 @@ const gasSender = faucetKey
 
 // TESTNET-ONLY test-funds pool: on only when its phrase is set. Exception to D6; never on mainnet.
 const poolPhrase = process.env.TESTNET_POOL_MNEMONIC;
+// Loaded only when configured: Railgun's SDK is large and slows start-up.
 const testFunds = poolPhrase
-  ? railgunTestFundsSender({
+  ? (await import('./test-funds/sender.ts')).railgunTestFundsSender({
       mnemonic: poolPhrase,
       rpcUrl: process.env.SEPOLIA_RPC_URL ?? 'https://ethereum-sepolia-rpc.publicnode.com',
       artifactDir: process.env.RAILGUN_ARTIFACT_DIR ?? './railgun-artifacts',
