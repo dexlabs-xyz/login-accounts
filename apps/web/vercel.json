@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://REPLACE-WITH-RAILWAY-HOST/api/:path*" },
-    { "source": "/oidc", "destination": "https://REPLACE-WITH-RAILWAY-HOST/oidc" },
-    { "source": "/oidc/:path*", "destination": "https://REPLACE-WITH-RAILWAY-HOST/oidc/:path*" },
-    { "source": "/.well-known/:path*", "destination": "https://REPLACE-WITH-RAILWAY-HOST/.well-known/:path*" },
+    { "source": "/api/:path*", "destination": "https://loginserver-production-cb04.up.railway.app/api/:path*" },
+    { "source": "/oidc", "destination": "https://loginserver-production-cb04.up.railway.app/oidc" },
+    { "source": "/oidc/:path*", "destination": "https://loginserver-production-cb04.up.railway.app/oidc/:path*" },
+    { "source": "/.well-known/:path*", "destination": "https://loginserver-production-cb04.up.railway.app/.well-known/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
