@@ -28,6 +28,11 @@ export function oidcRoutes(options: {
     cookieKeys: [randomUUID(), randomUUID()],
     clients: [
       {
+        client_id: 'chess-app-local',
+        client_name: 'Login Chess',
+        redirect_uris: ['http://localhost:5190/api/login/callback'],
+      },
+      {
         client_id: 'chess-local',
         client_name: 'Chess demo',
         redirect_uris: ['http://localhost:5190/callback'],
