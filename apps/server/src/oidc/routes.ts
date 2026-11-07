@@ -2,10 +2,10 @@
 import { Hono, type Handler } from 'hono';
 import type { HttpBindings } from '@hono/node-server';
 import { RESPONSE_ALREADY_SENT } from '@hono/node-server/utils/response';
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import type { DB } from '../db.ts';
 import type { Sessions } from '../passkeys/session.ts';
 import type { GetKycClaims } from './contracts.ts';
+import { loadOidcConfig } from './config.ts';
 import { createOidc } from './provider.ts';
 
 export function oidcRoutes(options: {
@@ -14,30 +14,11 @@ export function oidcRoutes(options: {
   issuer: string;
   getKycClaims?: GetKycClaims;
 }) {
-  // Development only; never written to disk or logged. Production key management is out of scope.
-  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const configuration = loadOidcConfig(process.env, options.issuer);
   const oidc = createOidc({
+    ...configuration,
     db: options.db,
-    issuer: options.issuer,
     getKycClaims: options.getKycClaims,
-    jwks: {
-      keys: [
-        { ...privateKey.export({ format: 'jwk' }), kid: randomUUID(), use: 'sig', alg: 'RS256' },
-      ],
-    },
-    cookieKeys: [randomUUID(), randomUUID()],
-    clients: [
-      {
-        client_id: 'chess-local',
-        client_name: 'Chess demo',
-        redirect_uris: ['http://localhost:5190/callback'],
-      },
-      {
-        client_id: 'second-local',
-        client_name: 'Second demo app',
-        redirect_uris: ['http://localhost:5190/callback'],
-      },
-    ],
     async getSignedInUser(request) {
       const user = options.sessions.getSignedInUser(request.headers.cookie);
       // Passkeys owns millisecond timestamps; OIDC Core uses Unix seconds.

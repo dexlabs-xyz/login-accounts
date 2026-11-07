@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "DEV_OUTBOX=1 DB_PATH=${DB_PATH:-./login-dev.sqlite} tsx watch --env-file-if-exists=../../.env src/main.ts",
     "dev:oidc-client": "OIDC_DEV_CLIENT=1 tsx watch src/oidc/dev-client.ts",
-    "start": "tsx src/main.ts"
+    "start": "tsx src/main.ts",
+    "oidc:generate-keys": "tsx src/oidc/generate-keys.ts",
+    "start:oidc-demo": "tsx src/oidc/dev-client.ts"
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",
