@@ -230,6 +230,27 @@ Code: `apps/web/src/deposits/mainnet.ts`.
 
 **Never** extend this to non-dry quotes, real deposit addresses or real funds.
 
+### Test funds ("Get 1,000 test USDT"): contradicts D6
+
+**Decided 2026-11-06 (team lead), built 2026-11-07.** Judges and testers get
+test USDT in one click instead of hunting for faucets. Tidepool's creator
+granted 200k test USDT; converted to 199,480 Sepolia USDT and shielded into
+the pool's private Railgun balance (with 0.15 ETH as WETH for fee reserves).
+Code: `apps/server/src/test-funds/`.
+
+- A signed-in account (verified email + passkey) claims **once**: a private
+  transfer of 1,000 test USDT plus 0.001 private ETH (its hidden fee
+  reserve). Global cap: 100 claims a day. The pool pays the gas from its own
+  public address (no broadcaster), then publishes the transfer's Proof of
+  Innocence data so the claimer's funds clear.
+- **Why it contradicts D6:** to send a claim, the server is told the
+  account's 0zk address. It keeps it in memory only until the transfer is
+  sent, stores only "this account claimed, when, and the pool's public
+  transaction" (`test_fund_claims`), and logs nothing. The screen says so.
+- The pool's recovery phrase is a host secret (`TESTNET_POOL_MNEMONIC`);
+  Railgun runs in the server process (in-memory DB, circuit files on disk).
+- Testnet tokens only. **Never on mainnet**: delete before any mainnet work.
+
 ## Verifying external contracts
 
 Using established contracts doesn't mean trusting them blindly. Before Login

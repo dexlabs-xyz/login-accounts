@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
 import { KycCard } from './Kyc.tsx';
+import { TestFunds } from './TestFunds.tsx';
 import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS } from './railgun/protocol.ts';
 import { AddMoney } from './deposits/AddMoney.tsx';
@@ -574,6 +575,7 @@ function Account({
       {me.hasVault && open && <PrivateBalance />}
       {me.hasVault && open && <SendPrivately confirmWithPasskey={confirmWithPasskey} />}
       {me.hasVault && open && <Withdraw confirmWithPasskey={confirmWithPasskey} />}
+      {me.hasVault && open && <TestFunds />}
       {me.hasVault && open && <AddMoney />}
 
       {atRisk && (

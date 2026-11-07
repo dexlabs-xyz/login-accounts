@@ -7,7 +7,7 @@ import type { Context } from 'hono';
 /** An error safe to show the client: a stable code plus optional extra fields. Never put request data in it. */
 export class ApiError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409 | 429,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 429 | 503,
     readonly code: string,
     readonly extra: Record<string, unknown> = {},
   ) {

@@ -20,6 +20,8 @@ import type { GetKycClaims } from './oidc/contracts.ts';
 import { oidcRoutes } from './oidc/routes.ts';
 import { createSessions } from './passkeys/session.ts';
 import { testnetGasRoutes, type GasSender } from './testnet-gas/routes.ts';
+import { testFundsRoutes } from './test-funds/routes.ts';
+import type { TestFundsSender } from './test-funds/sender.ts';
 
 export interface AppDeps {
   config: Config;
@@ -31,6 +33,8 @@ export interface AppDeps {
   now?: () => number;
   /** TESTNET-ONLY gas faucet (contradicts D6; never on mainnet). Null = off. */
   gasSender?: GasSender | null;
+  /** TESTNET-ONLY test-funds pool (exception to D6; never on mainnet). Null = off. */
+  testFunds?: TestFundsSender | null;
   /** Explicit opt-in for the localhost-only OIDC iteration. */
   oidcIssuer?: string;
   /** Adapter supplied by the KYC component when PR #4 and OIDC are combined. */
@@ -56,6 +60,7 @@ export function createApp(deps: AppDeps) {
     kycRoutes({ db: deps.db, kyc: deps.kyc ?? null, session: sessions.require, now, localDev: deps.config.rpId === 'localhost' }),
   );
   app.route('/', testnetGasRoutes({ sessions, sender: deps.gasSender ?? null, now }));
+  app.route('/', testFundsRoutes({ db: deps.db, sessions, sender: deps.testFunds ?? null, now }));
 
   const oidcIssuer = deps.oidcIssuer ?? (process.env.OIDC_ENABLED === '1'
     ? process.env.OIDC_ISSUER ?? 'http://localhost:5180/oidc' : undefined);
