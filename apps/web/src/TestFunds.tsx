@@ -63,7 +63,7 @@ export function TestFunds() {
         <>
           <p className="muted small">
             Try Login without hunting for faucets: get {view.amountUsdt} test USDT in your private balance, once per account.
-            Test tokens have no value.
+            Ready to spend in about an hour, after Railgun’s privacy check. Test tokens have no value.
           </p>
           <button className="primary" disabled={busy || !pw.railgunAddress} onClick={() => void claim()}>
             {busy ? 'Claiming…' : `Get ${view.amountUsdt} test USDT`}
@@ -82,8 +82,8 @@ export function TestFunds() {
       {view.status === 'sent' && (
         <div className="stack">
           <p role="status" className="info" data-testid="testfunds-status">
-            Sent {view.amountUsdt} test USDT to your private balance. It shows as “being checked” until Railgun’s privacy check
-            clears.
+            Sent {view.amountUsdt} test USDT to your private balance. Ready to spend in about an hour: it shows as “being
+            checked” until Railgun’s privacy check clears.
           </p>
           {view.txHash && (
             <a className="small" href={`https://sepolia.etherscan.io/tx/${view.txHash}`} target="_blank" rel="noreferrer">
