@@ -1,0 +1,28 @@
+{
+  "name": "@login/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "DEV_OUTBOX=1 DB_PATH=${DB_PATH:-./login-dev.sqlite} tsx watch --env-file-if-exists=../../.env src/main.ts",
+    "dev:oidc-client": "OIDC_DEV_CLIENT=1 tsx watch src/oidc/dev-client.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@railgun-community/engine": "9.9.1",
+    "@railgun-community/shared-models": "8.2.1",
+    "@railgun-community/wallet": "11.2.0",
+    "@simplewebauthn/server": "14.0.3",
+    "ethers": "6.14.3",
+    "hono": "4.13.13",
+    "memdown": "6.1.1",
+    "oidc-provider": "9.13.3",
+    "snarkjs": "0.7.6",
+    "tsx": "4.23.15"
+  },
+  "devDependencies": {
+    "@types/oidc-provider": "9.13.1",
+    "openid-client": "6.8.9"
+  }
+}

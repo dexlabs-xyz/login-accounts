@@ -36,6 +36,22 @@ OPTIONAL_DOMAINS=(
   "solver-relay-v2.chaindefuser.com"
   "bridge.chaindefuser.com"
   "api.sumsub.com"                # Sumsub KYC (use sandbox mode only)
+  "ethereum-sepolia-rpc.publicnode.com"  # Sepolia RPC (Railgun home chain, testnet)
+  "rail-squid.squids.live"        # Railgun quick-sync index
+  "ipfs-lb.com"                   # Railgun circuit artifacts + Proof of Innocence list
+  "ppoi.fdi.network"              # Railgun Proof of Innocence node (community-run, from Railgun docs)
+  "www.usetidepool.tech"          # Tidepool: community-run, testnet-only 1Click-compatible API for NEAR Intents
+  "1click.chaindefuser.com"       # MAINNET NEAR Intents 1Click API: dry (quote-only) price checks, no funds. Approved exception.
+  "discovery.rootedinprivacy.com" # Railgun broadcaster network (Waku): peer discovery
+  "relay-a.rootedinprivacy.com"   # Railgun broadcaster network: relays
+  "relay-b.rootedinprivacy.com"
+  "client-edge.rootedinprivacy.com"
+  "seed-a.rootedinprivacy.com"    # more Railgun broadcaster peers (reliability)
+  "seed-b.rootedinprivacy.com"
+  "support-1.rootedinprivacy.com"
+  "support-2.rootedinprivacy.com"
+  "support-3.rootedinprivacy.com"
+  "support-4.rootedinprivacy.com"
 )
 # ----------------------------------------------------------------------------
 

@@ -151,3 +151,13 @@ vite.config.ts.timestamp-*
 .internal/
 AGENTS.md
 CLAUDE.md
+
+# Local dev database
+*.sqlite
+*.sqlite-*
+# Playwright
+test-results/
+playwright-report/
+
+# Railgun circuit files downloaded by the server (public, large)
+apps/server/railgun-artifacts/
