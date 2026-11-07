@@ -8,6 +8,9 @@
 import {
   gasEstimateForUnprovenTransfer,
   generatePOIsForWallet,
+  generatePOIsForWalletAndRailgunTxid,
+  getChainTxidsStillPendingSpentPOIs,
+  syncRailgunTransactionsV2,
   generateTransferProof,
   populateProvedTransfer,
   refreshSpentPOIsForWallet,
@@ -33,20 +36,33 @@ export interface TestFundsSender {
 
 export function railgunTestFundsSender(opts: { mnemonic: string; rpcUrl: string; artifactDir: string }): TestFundsSender {
   let pool: Pool | null = null;
+  let upkeepRunning = false;
   const upkeep = async () => {
-    if (!pool) return;
+    if (!pool || upkeepRunning) return; // one round at a time
+    upkeepRunning = true;
     try {
       await pool.refresh();
       // Publish privacy-check data for anything the pool sent, so recipients' funds clear.
+      // That needs the Railgun transaction list (TXID tree) synced first: Railgun's indexer
+      // records a transfer some minutes after it lands, and until then nothing can be generated.
+      await syncRailgunTransactionsV2(NETWORK);
+      for (const txid of await getChainTxidsStillPendingSpentPOIs(V2, NETWORK, pool.walletId)) {
+        await generatePOIsForWalletAndRailgunTxid(V2, NETWORK, pool.walletId, txid).catch(() => {}); // not indexed yet: next round
+      }
       await generatePOIsForWallet(NETWORK, pool.walletId);
       await refreshSpentPOIsForWallet(V2, NETWORK, pool.walletId);
-    } catch {
-      // Third-party services may be slow; try again next round.
+    } catch (e) {
+      // Third-party services may be slow; try again next round. Message only, no wallet details.
+      console.error('Test-funds pool upkeep:', e instanceof Error ? e.message.slice(0, 120) : 'unknown');
+    } finally {
+      upkeepRunning = false;
     }
   };
   openPool(opts).then(
     (p) => {
       pool = p;
+      // Right away too: a restart may have left a sent transfer without its privacy-check data.
+      void upkeep();
       setInterval(() => void upkeep(), UPKEEP_MS);
       console.log('Test-funds pool ready (TESTNET).');
     },
