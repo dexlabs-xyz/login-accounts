@@ -17,8 +17,8 @@ describe('grossForShield', () => {
       }
     }
   });
-  it('1,000 USDT at 0.25% costs 1,002.506266 USDT', () => {
-    expect(grossForShield(CLAIM_USDT, 25n)).toBe(1_002_506_266n);
+  it('250 USDT at 0.25% costs 250.626567 USDT', () => {
+    expect(grossForShield(CLAIM_USDT, 25n)).toBe(250_626_567n);
   });
 });
 
@@ -27,7 +27,7 @@ describe('canPayClaim', () => {
   it('pays with enough USDT and ETH (wrapping a 0.01 batch and keeping gas)', () => {
     expect(canPayClaim(ok, 25n)).toBe(true);
   });
-  it('refuses when USDT is short of 1,000 plus the fee', () => {
+  it('refuses when USDT is short of 250 plus the fee', () => {
     expect(canPayClaim({ ...ok, usdt: CLAIM_USDT }, 25n)).toBe(false);
     expect(canPayClaim({ ...ok, usdt: grossForShield(CLAIM_USDT, 25n) }, 25n)).toBe(true);
   });

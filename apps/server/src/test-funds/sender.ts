@@ -1,6 +1,6 @@
 /**
  * TESTNET ONLY. Sends one claim from the pool: a single shield from the pool's
- * public address straight into the claimer's 0zk address, of 1,000 test USDT
+ * public address straight into the claimer's 0zk address, of 250 test USDT
  * plus 0.001 ETH as WETH (the claimer's hidden network-fee reserve). Railgun's
  * shield fee is added on top, so the claimer receives exactly these amounts.
  *
@@ -24,7 +24,7 @@ import {
 } from '@railgun-community/wallet';
 import { grossForShield, NETWORK, openPool, publicBalances, shieldClaim, V2, type Pool } from './pool.ts';
 
-export const CLAIM_USDT = 1_000n * 1_000_000n; // 1,000 test USDT (team decision, 6 Nov)
+export const CLAIM_USDT = 250n * 1_000_000n; // 250 test USDT (team decision, 8 Nov; was 1,000)
 export const CLAIM_FEE_RESERVE_WEI = 1_000_000_000_000_000n; // 0.001 ETH, as private WETH
 const WRAP_BATCH_WEI = 10_000_000_000_000_000n; // wrap 0.01 ETH at a time
 const GAS_KEEP_WEI = 3_000_000_000_000_000n; // keep 0.003 ETH public for gas

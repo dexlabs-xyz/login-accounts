@@ -230,7 +230,7 @@ Code: `apps/web/src/deposits/mainnet.ts`.
 
 **Never** extend this to non-dry quotes, real deposit addresses or real funds.
 
-### Test funds ("Get 1,000 test USDT"): contradicts D6
+### Test funds ("Get 250 test USDT"): contradicts D6
 
 **Decided 2026-11-06 (team lead), built 2026-11-07.** Judges and testers get
 test USDT in one click instead of hunting for faucets. Tidepool's creator
@@ -238,16 +238,17 @@ granted 200k test USDT; converted to 199,480 Sepolia USDT and shielded into
 the pool's private Railgun balance (with 0.15 ETH as WETH for fee reserves).
 Code: `apps/server/src/test-funds/`.
 
-- A signed-in account (verified email + passkey) claims **once**: 1,000 test
+- A signed-in account (verified email + passkey) claims **once**: 250 test
   USDT plus 0.001 ETH as WETH (its hidden fee reserve). Global cap: 100
   claims a day.
 - **Revised 2026-11-08: claims are shields.** Each claim is one shield from the
   pool's public address straight into the claimer's 0zk address (Railgun's
-  0.25% shield fee added on top, so exactly 1,000 arrives). Public ETH is
-  wrapped to WETH in 0.01 batches. On-chain this shows the pool moving 1,000
-  USDT into Railgun, not who received it. Spendable after Railgun's usual
+  0.25% shield fee added on top, so exactly the claim arrives). Public ETH is
+  wrapped to WETH in 0.01 batches. On-chain this shows the pool moving the
+  claim's USDT into Railgun, not who received it. Spendable after Railgun's usual
   shield check (about an hour). Tidepool topped the pool up with 50,000
-  Sepolia USDT for this.
+  Sepolia USDT for this. Claim size cut from 1,000 to 250 USDT on 2026-11-08
+  (team lead: enough to test anything; the 48k then covers ~190 claims).
 - **Why not private transfers (the first version):** a self-signed private
   transfer needs the pool to publish its own Proof of Innocence data, which
   depends on Railgun's Sepolia transaction index (TXID tree). Railgun's public

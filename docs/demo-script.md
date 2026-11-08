@@ -20,7 +20,7 @@ a day ahead:
 
 ## 2. One-click test funds (20 s)
 
-- Press **Get 1000 test USDT** → "Sending your test funds…" → Sent.
+- Press **Get 250 test USDT** → "Sending your test funds…" → Sent.
 - Say: *no faucets. It arrives privately and clears Railgun's privacy check.*
 
 ## 3. Add money from any wallet (60 s), as Alice

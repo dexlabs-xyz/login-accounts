@@ -1,5 +1,5 @@
 /**
- * "Get test funds" (TESTNET ONLY): one claim of 1,000 test USDT per account,
+ * "Get test funds" (TESTNET ONLY): one claim of 250 test USDT per account,
  * shielded by Login's test-funds pool straight into the account's private
  * balance, plus a small hidden reserve that pays network fees. Exception to D6, labelled on screen: to send it, the
  * server is told this account's private address for this one claim.
