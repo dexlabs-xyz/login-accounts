@@ -1,193 +1,108 @@
 # OIDC provider
 
-**Owner: Login infra (OIDC) team.** The passkeys team doesn't edit this folder.
+**Owner: Login infra team. Unaudited hackathon implementation, testnet only.**
+The approved `oidc-provider` library runs inside the shared Login API process,
+under `/oidc/*`. Root discovery redirects to
+`/oidc/.well-known/openid-configuration`. Passkeys and KYC run in that same API.
 
-The OpenID Connect provider runs inside the shared Login API server
-(`../app.ts`), under `/oidc/*` and `/.well-known/*`. Library: `oidc-provider`
-(approved by the team on 2026-11-04).
+Railway’s live API build command remains `npm install --no-audit --no-fund`;
+`npm ci` below is for local development. Existing Vercel rewrites are already
+configured in `apps/web/vercel.json` and remain in place.
 
-## What the passkeys component gives you
+For the Vercel/Railway public demo, see the complete
+[deployment and Gold DNS handoff](../../../../docs/oidc-public-demo.md).
+The live hosted demo keeps `WEBAUTHN_RP_ID=demo.withlogin.com` so existing
+passkeys continue working. Its issuer host must equal the configured RP or fall
+under it at a dot boundary; Secure cookies and the exact passkey origin are still
+required. Any later RP migration is separate from this OIDC rollout.
 
-### `getSignedInUser(cookieHeader)` — `../passkeys/session.ts`
+The only public issuer allowed is `https://demo.withlogin.com/oidc`. All other
+non-local issuers are refused. `OIDC_ENABLED=1` opts in; otherwise OIDC is off.
+Local default: `http://localhost:5180/oidc`. The `/oidc` suffix is required.
 
-Pass the request's raw `Cookie` header. Returns `null` if signed out, otherwise:
+## Shared contracts
 
-```ts
-{
-  userId: string; // stable internal ID (users.id). Never send to apps; derive a per-app ID.
-  authenticatedAt: number; // ms since epoch of the last successful passkey check
-  method: 'passkey';
-  userVerified: true; // every passkey check requires Face ID / fingerprint / PIN
-}
-```
+`routes.ts` calls `sessions.getSignedInUser(cookieHeader)`, never the passkey
+session tables. Its result contains `userId`, `authenticatedAt` in milliseconds,
+`method: 'passkey'` and `userVerified: true`. OIDC converts the timestamp to Unix
+seconds while retaining milliseconds to require a newer check for fresh sign-in.
+An email-code check alone cannot authenticate an OIDC interaction. A passkey
+that cannot unlock the wallet can still sign in to apps.
 
-- `authenticatedAt` only moves when a passkey check succeeds (sign-in, unlock,
-  confirming a send, adding a passkey). Verifying an email code never counts.
-- Use it for `max_age` / `prompt=login`: if it's too old, send the user to
-  `/signin` with `fresh=1`.
-- Any passkey works for signing in to apps, including ones that can't open the
-  wallet. Don't require the wallet to be unlocked.
-- Don't read the `sessions` table or the `login_session` cookie directly.
-- The session cookie is `SameSite=Lax`, so it arrives when an app redirects the
-  user to `/oidc/auth`.
+| Event                  | URL                                             |
+| ---------------------- | ----------------------------------------------- |
+| Sign in                | `/signin?interaction=<id>`                      |
+| Fresh passkey required | `/signin?interaction=<id>&fresh=1`              |
+| Completed passkey      | `/oidc/interaction/<id>/complete`               |
+| Cancelled              | `/oidc/interaction/<id>/abort?reason=cancelled` |
 
-It's created in `../app.ts` as `sessions.getSignedInUser`; pass it into your routes.
+Interactions require their browser-bound cookie and expire after ten minutes.
+Consent POSTs require the configured Login Origin. Only authorization code with
+PKCE is allowed. Public clients get a different persisted random subject per
+app; no email, name, wallet address or identity documents. Consent is required.
 
-### Sign-in handoff — the `/signin` page
-
-| Step                               | URL                                             |
-| ---------------------------------- | ----------------------------------------------- |
-| OIDC sends the user to sign in     | `/signin?interaction=<id>`                      |
-| …and demands a fresh passkey check | `/signin?interaction=<id>&fresh=1`              |
-| Success (signed in or signed up)   | `/oidc/interaction/<id>/complete`               |
-| User cancels                       | `/oidc/interaction/<id>/abort?reason=cancelled` |
-
-- `<id>` must match `^[A-Za-z0-9_-]{1,128}$`, or the page refuses to redirect.
-- The page never accepts a return URL; it only builds these two fixed paths.
-- You own validating the interaction ID and its lifetime. Unknown or expired IDs
-  should be handled on your side (e.g. `reason=expired` is yours to emit).
-- Without `fresh=1`, a user who already has a session goes straight to
-  `complete` with no prompt.
-
-## Database
-
-Add migrations as `../migrations/NNNN_oidc_<what>.ts` and list them in
-`../migrations/index.ts`. Prefix tables with `oidc_`. Never edit merged migrations.
+`app.ts` now wires KYC's merged `createGetKycClaims(db)` adapter through
+`oidcRoutes`. A passed L1/L2/L3 yields `verified_human: true` and
+`verification_sandbox: true`; missing/unverified results omit both, never `false`.
+KYC is optional. Only `openid` is supported: `kyc_level` is not disclosed even if
+an adapter returns it. A future level scope needs its own explicit consent UI.
 
 ## Local development
 
-- API server: `127.0.0.1:8787`. Login web app: `http://localhost:5180` (Vite
-  forwards `/api`, `/oidc` and `/.well-known` to the API).
-- Demo app: `http://localhost:5190`.
-- Environment variables: prefix with `OIDC_` (e.g. `OIDC_ISSUER=http://localhost:5180`).
-  Development signing keys are generated locally and never committed.
-- Bind dev servers to `127.0.0.1`: inside the container `localhost` is IPv6-only,
-  and VS Code's port forwarding connects over IPv4.
-
-## Integrated local iteration (OIDC team)
-
-The provider is now mounted at the marked location in `app.ts`, through
-`oidc/routes.ts`. The Node/Hono bridge lets `oidc-provider` handle its native
-request and response without another API server. It passes the Cookie header to
-`sessions.getSignedInUser` and converts the returned milliseconds to OIDC seconds,
-retaining millisecond precision to enforce a genuinely newer check for fresh sign-in.
-The OIDC module never reads passkey session tables or cookie values directly.
-
-From the repository root, on Node 22.13+:
+On Node 22.13+, from the repository root:
 
 ```sh
 npm ci
 npm run dev:oidc
 ```
 
-This starts the shared API on 127.0.0.1:8787, Vite on localhost:5180 and the demo
-client on localhost:5190. Stop other dev servers using these ports first. Forward
-5180 and 5190 to the same local port numbers if using a remote container. Open
-http://localhost:5190 and choose **Continue with Login**. This iteration now uses
-**the real passkey routes**, not the old simulated sign-in button.
+This starts the shared API on `127.0.0.1:8787`, Login web on
+`http://localhost:5180`, and a small claims demo on `http://localhost:5190`.
+Stop other servers using those ports first. Vite forwards `/api`, `/oidc` and
+`/.well-known`. In a remote dev container, forward 5180 and 5190 to those same
+local port numbers. The demo uses real passkey routes. For a new test account,
+read its email code at `http://localhost:5180/dev/outbox` (local development only).
+Never use real identity documents or funds.
 
-For a new account, use a test email; the code appears at
-http://localhost:5180/dev/outbox (development only). Create a passkey when asked,
-then allow consent. Returning users can sign in with a passkey. A passkey that
-cannot open the wallet still works for OIDC. KYC is not connected, so
-`verified_human` is omitted when no passed KYC level is supplied. Do not use real identity documents or funds.
+The playable chess app is in `IyamGold/chess-ui`. `chess-app-local` is registered
+for `http://localhost:5190/api/login/callback`; `chess-local` and `second-local`
+are registered for the claims demo's `/callback`. Run only one of these clients
+on port 5190 at a time. Hosted registrations use explicit `OIDC_CLIENTS` instead.
 
-`npm run dev` remains the passkey-only workflow unless `OIDC_ENABLED=1` is set.
-The integration explicitly opts in with that variable. `OIDC_ISSUER` defaults to
-`http://localhost:5180/oidc`; the `/oidc` suffix is required. Discovery is at
-`/oidc/.well-known/openid-configuration`; the root discovery path redirects there.
-Endpoint URLs use the configured public issuer, even when Vite rewrites Host to
-the internal API address. Forwarded headers are not trusted as issuer settings.
+Local keys are ephemeral unless **both** `OIDC_JWKS` and `OIDC_COOKIE_KEYS` are
+provided. Hosted mode requires both. `npm run oidc:generate-keys -- <private-file>`
+generates them once without printing them. Do not commit or share that file.
 
-The local demo uses approved `openid-client` to validate discovery, state, nonce,
-PKCE, ID-token signature/issuer/audience/expiry and UserInfo subject. It discards
-tokens after use and displays only the per-app ID and verification status. Its
-result expires after ten minutes. It requires `OIDC_DEV_CLIENT=1` and a localhost
-HTTP issuer; the npm script supplies the flag. No provider, cookie keys, request
-bodies, tokens or private signing material are logged.
+## Storage and boundaries
 
-### Storage and limitations
+Migration `0004_oidc_initial` follows KYC's `0003`. Only the logged migration
+runner creates schema. SQLite stores protocol state in `oidc_records` and
+per-app IDs in `oidc_subjects`. Keep it private on a persistent volume; reusing
+keys without retaining SQLite is insufficient. See the deployment guide for
+restart and rotation requirements. The shared API uses no separate OIDC server.
 
-Migration `0004_oidc_initial` is registered in the shared migration registry. It
-creates only `oidc_records` and `oidc_subjects`; passkey migrations and tables are
-unchanged. SQLite contains protocol sessions, grants, authorization codes and
-access tokens; keep the development database private. Per-app IDs persist in the
-shared database across restarts. OIDC signing and cookie keys are ephemeral in
-this iteration, so restarting the API requires a new OIDC flow. Passkey sessions
-and credentials follow the passkey component's existing storage behavior.
+`openid-client` is used only by `dev-client.ts`, a separate optional relying-party
+process, and remains a **devDependency**. It verifies state, nonce, PKCE, issuer,
+audience, expiry, ID-token signature and UserInfo subject, then discards tokens.
+Its memory-only result expires in ten minutes. Public second-app mode is opt-in
+and uses Secure cookies and HTTPS validation; the shared API's production install
+does not include this demo client or its library.
 
-Local-only and unaudited: production issuers are refused. Production signing-key
-management, client registration administration, grant revocation UI and abuse
-controls remain future work. Only the `openid` scope is supported: email, name,
-wallet data and identity documents are not sent to apps. Approved sandbox KYC,
-when connected by its owner, must carry `verification_sandbox: true`.
+Labels remain “Unaudited” and “Testnet”. Dynamic registration, production issuer
+support, grant revocation UI and broader abuse controls remain future work.
 
-### Validation
+## Validation
 
 ```sh
 npm run typecheck
 npm test
-# With Playwright Chromium installed (starts its own servers; stop manual dev servers):
 npm run test:oidc:browser
 ```
 
-For a system Chromium set `OIDC_CHROMIUM_EXECUTABLE` to its executable path. The
-browser test uses Chrome virtual passkeys without PRF wallet support. It checks
-signup, token-validated OIDC sign-in, per-app IDs, consent reuse, a fresh real
-WebAuthn verification, logout and cancellation. It does not create a wallet or
-contact chain services. The spec lives in `e2e/oidc.spec.ts` and runs with the rest of the Playwright suite. Token-bearing traces, screenshots and videos are disabled for this spec. Protocol tests additionally cover PKCE failure, replay,
-expiry, Origin checks, browser-bound interactions and verification claims.
-
-Shared review surface: `app.ts`, migration registration and its expectation test,
-workspace manifests and the root lockfile. `main.ts`, `config.ts`, `db.ts`, Vite
-configuration, passkey code and the web application are unchanged by this work.
-
-### KYC contract and merge order (PR #4 / PR #5)
-
-OIDC follows KYC's `kycClaims(level, approvedScopes)` semantics: `verified_human`
-is present as `true` only for a passed L1/L2/L3. Missing/pending/rejected KYC with
-no previously passed level emits no humanity claim, rather than `false`. The
-KYC owner determines the highest passed level; OIDC does not infer it from an
-in-progress attempt or read KYC-owned tables.
-
-`AppDeps.getKycClaims(userId, approvedScopes)` is threaded through `oidcRoutes`
-to the provider. It returns KYC's claims shape with optional
-`verification_sandbox: true` metadata for sandbox results. The callback defaults
-to absent, which emits no KYC claims. The app therefore still supports login
-without KYC. The demo displays “Not provided” instead of treating absence as a
-failed verification.
-
-**The real KYC adapter is not connected in this branch:** PR #4 is still a
-separate, unmerged branch. Whichever PR lands second must wire this callback in
-the shared application composition using a KYC-owned level lookup and the
-existing helper, e.g.:
-
-```ts
-getKycClaims: async (userId, approvedScopes) => {
-  const level = await getPassedKycLevel(userId); // exported by KYC, not an OIDC SQL query
-  const claims = kycClaims(level, approvedScopes);
-  return {
-    ...claims,
-    ...(claims.verified_human ? { verification_sandbox: true } : {}),
-  };
-},
-```
-
-`getPassedKycLevel` is a required KYC integration export, not an existing function
-in PR #4. Alternatively KYC can export the complete callback. Do not merge the
-combined feature as fully wired until this adapter is supplied and tested.
-
-Only `openid` is currently supported and granted. No `kyc_level` value is emitted,
-even if the callback returns one. Supporting that scope needs explicit consent UI
-and tests in a follow-up. The provider supplies granted token scopes to the callback.
-
-Migration number `0003` is reserved for KYC; our migration/export is now `0004`
-/ `m0004`. Until KYC lands, the local registry intentionally contains 0001, 0002, 0004. When combined, add KYC's 0003 ahead of 0004 and update the migration test.
-Existing local OIDC tables are preserved by the idempotent 0004 migration.
-`createStorage` no longer creates schema: callers and standalone tests run the
-logged migration runner before constructing storage.
-
-`openid-client` is used only by `dev-client.ts` and is a server-workspace
-**devDependency**. The shared API imports only `oidc-provider`; it does not load
-the demo client. The user approved the demo dependency during local development,
-and it is now isolated from the production dependency set as requested.
+Set `OIDC_CHROMIUM_EXECUTABLE` for a system Chromium if needed. The browser spec
+in `e2e/oidc.spec.ts` uses virtual passkeys and tests consent, freshness,
+pairwise IDs, logout and cancellation. It disables token-bearing traces,
+screenshots and videos. Protocol/config tests cover hosted HTTPS/proxy behavior,
+Secure cookies, restart continuity, PKCE failure, replay, expiry, browser binding,
+Origin checks, and the real sandbox KYC handoff. Public DNS/TLS still needs a
+post-deployment smoke test by the deployment owner.

@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { generateKeyPairSync, randomUUID, createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { setDefaultResultOrder } from 'node:dns';
-import { createOidc } from './provider.ts';
+import { createOidc, type OidcOptions } from './provider.ts';
 import { createStorage } from './storage.ts';
 import { migrate } from '../migrations/index.ts';
 import type { SignedInUser, KycClaims } from './contracts.ts';
@@ -42,12 +42,19 @@ async function fixture() {
   const port = (server.address() as { port: number }).port;
   const origin = `http://localhost:${port}`;
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
-  oidc = createOidc({
+  const options: OidcOptions = {
     issuer: `${origin}/oidc`,
     db,
     cookieKeys: [randomUUID()],
     jwks: {
-      keys: [{ ...privateKey.export({ format: 'jwk' }), kid: 'test', use: 'sig', alg: 'RS256' }],
+      keys: [
+        {
+          ...privateKey.export({ format: 'jwk' }),
+          kid: 'test',
+          use: 'sig',
+          alg: 'RS256',
+        },
+      ],
     },
     clients: ['app-a', 'app-b'].map((id) => ({
       client_id: id,
@@ -59,13 +66,17 @@ async function fixture() {
       expect(scopes).toEqual(['openid']);
       return verification;
     },
-  });
+  };
+  oidc = createOidc(options);
   const cookies = new Map<string, string>();
   async function request(path: string, init: RequestInit = {}, jar = cookies) {
     const response = await fetch(new URL(path, origin), {
       ...init,
       redirect: 'manual',
-      headers: { cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; '), ...init.headers },
+      headers: {
+        cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; '),
+        ...init.headers,
+      },
     });
     for (const cookie of response.headers.getSetCookie()) {
       const [pair] = cookie.split(';');
@@ -101,13 +112,18 @@ async function fixture() {
           method: 'passkey',
           userVerified: true,
         };
-        path = `/oidc/interaction/${new URL(location, origin).searchParams.get('interaction')}/complete`;
+        path = `/oidc/interaction/${new URL(location, origin).searchParams.get(
+          'interaction',
+        )}/complete`;
       } else if (location) path = location;
       else {
         const html = await response.text();
         const action = /action="([^"]+\/confirm)"/.exec(html)?.[1];
         if (!action) throw new Error(`Unexpected flow response (${response.status})`);
-        const approved = await request(action, { method: 'POST', headers: { origin } });
+        const approved = await request(action, {
+          method: 'POST',
+          headers: { origin },
+        });
         path = approved.headers.get('location')!;
       }
     }
@@ -134,6 +150,9 @@ async function fixture() {
     authorize,
     finish,
     exchange,
+    restart() {
+      oidc = createOidc(options);
+    },
     setUser(value: SignedInUser | null) {
       user = value;
     },
@@ -167,7 +186,9 @@ describe('OIDC local integration', () => {
       expect(response.status).toBe(200);
       const tokens = await response.json();
       const info = await (
-        await f.request('/oidc/me', { headers: { authorization: `Bearer ${tokens.access_token}` } })
+        await f.request('/oidc/me', {
+          headers: { authorization: `Bearer ${tokens.access_token}` },
+        })
       ).json();
       expect(typeof info.sub === 'string' && info.sub !== 'internal-user').toBe(true);
       expect(Object.hasOwn(info, 'verified_human')).toBe(false);
@@ -216,8 +237,12 @@ describe('OIDC local integration', () => {
       const action = /action="([^"]+\/confirm)"/.exec(html)?.[1];
       expect(!!action).toBe(true);
       expect(
-        (await f.request(action!, { method: 'POST', headers: { origin: 'http://evil.invalid' } }))
-          .status,
+        (
+          await f.request(action!, {
+            method: 'POST',
+            headers: { origin: 'http://evil.invalid' },
+          })
+        ).status,
       ).toBe(403);
       const cancel = await f.request(action!.replace('/confirm', '/abort'), {
         method: 'POST',
@@ -301,12 +326,20 @@ describe('OIDC local integration', () => {
     const f = await fixture();
     for (const approved of [false, true]) {
       f.setVerification(
-        approved ? { verified_human: true, kyc_level: 'L2', verification_sandbox: true } : {},
+        approved
+          ? {
+              verified_human: true,
+              kyc_level: 'L2',
+              verification_sandbox: true,
+            }
+          : {},
       );
       const callback = await f.finish(f.authorize());
       const tokens = await (await f.exchange(callback.searchParams.get('code')!)).json();
       const info = await (
-        await f.request('/oidc/me', { headers: { authorization: `Bearer ${tokens.access_token}` } })
+        await f.request('/oidc/me', {
+          headers: { authorization: `Bearer ${tokens.access_token}` },
+        })
       ).json();
       expect(Object.hasOwn(info, 'verified_human')).toBe(approved);
       if (approved) expect(info.verified_human).toBe(true);
@@ -342,4 +375,34 @@ it('leaves schema creation to the logged migration runner', () => {
   expect(
     db.prepare("SELECT count(*) AS n FROM schema_migrations WHERE id='0004_oidc_initial'").get(),
   ).toEqual({ n: 1 });
+});
+
+it('retains signed sessions, issued tokens, pending codes and pairwise IDs when restarted with the same keys and database', async () => {
+  const f = await fixture();
+  const callback = await f.finish(f.authorize());
+  const jwksBefore = await (await f.request('/oidc/jwks')).json();
+  expect(
+    jwksBefore.keys.every(
+      (key: Record<string, unknown>) => key.n && key.e && !('d' in key) && !('p' in key),
+    ),
+  ).toBe(true);
+  f.restart();
+  const response = await f.exchange(callback.searchParams.get('code')!);
+  expect(response.status).toBe(200);
+  const tokens = await response.json();
+  const info = await (
+    await f.request('/oidc/me', {
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    })
+  ).json();
+  f.restart();
+  const infoAfter = await (
+    await f.request('/oidc/me', {
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    })
+  ).json();
+  expect(infoAfter.sub === info.sub).toBe(true);
+  expect(await (await f.request('/oidc/jwks')).json()).toEqual(jwksBefore);
+  const remembered = await f.request(f.authorize('app-a', { prompt: 'none' }));
+  expect(new URL(remembered.headers.get('location')!).searchParams.has('code')).toBe(true);
 });

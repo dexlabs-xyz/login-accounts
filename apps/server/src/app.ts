@@ -16,6 +16,7 @@ import type { Mailer, OutboxEmail } from './mail.ts';
 import { createGetKycClaims } from './kyc/claims.ts';
 import { kycRoutes, type KycDeps } from './kyc/routes.ts';
 import { passkeyRoutes } from './passkeys/routes.ts';
+import { issuerUrl } from './oidc/config.ts';
 import type { GetKycClaims } from './oidc/contracts.ts';
 import { oidcRoutes } from './oidc/routes.ts';
 import { createSessions } from './passkeys/session.ts';
@@ -65,7 +66,12 @@ export function createApp(deps: AppDeps) {
   const oidcIssuer = deps.oidcIssuer ?? (process.env.OIDC_ENABLED === '1'
     ? process.env.OIDC_ISSUER ?? 'http://localhost:5180/oidc' : undefined);
   if (oidcIssuer) {
-    if (deps.config.rpId !== 'localhost') throw new Error('Local OIDC requires the localhost passkey configuration.');
+    const issuer = issuerUrl(oidcIssuer);
+    const compatible = issuer.protocol === 'http:'
+      ? deps.config.rpId === 'localhost'
+      : (issuer.hostname === deps.config.rpId || issuer.hostname.endsWith('.' + deps.config.rpId)) &&
+        deps.config.secureCookies && deps.config.origins.includes(issuer.origin);
+    if (!compatible) throw new Error('OIDC issuer and passkey origin/RP configuration must agree.');
     // KYC owns the level lookup; OIDC only passes the scopes the user granted (agreed on PR #4).
     const getKycClaims = deps.getKycClaims ?? createGetKycClaims(deps.db);
     app.route('/', oidcRoutes({ db: deps.db, sessions, issuer: oidcIssuer, getKycClaims }));

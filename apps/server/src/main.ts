@@ -2,12 +2,17 @@ import { serve } from '@hono/node-server';
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { openDb } from './db.ts';
+import { issuerUrl } from './oidc/config.ts';
 import { loadKycConfig } from './kyc/config.ts';
 import { createSumsubClient } from './kyc/sumsub.ts';
 import { devOutboxMailer, resendMailer, type Mailer, type OutboxEmail } from './mail.ts';
 import { ethersGasSender } from './testnet-gas/sender.ts';
 
 const config = loadConfig();
+if (process.env.OIDC_ENABLED === '1' && issuerUrl(process.env.OIDC_ISSUER ?? 'http://localhost:5180/oidc').protocol === 'https:' &&
+    (!process.env.DB_PATH || config.dbPath === ':memory:')) {
+  throw new Error('Hosted OIDC requires DB_PATH on a persistent volume.');
+}
 const outbox: OutboxEmail[] = [];
 
 let mailer: Mailer;
