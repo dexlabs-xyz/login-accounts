@@ -75,6 +75,10 @@ checked"), usually one to two hours, before they can be spent.
   (notes in the design doc), not built.
 - **Split-key recovery** for losing every passkey.
 - **Withdrawals to Solana** (today: Ethereum addresses only).
+- **A developer dashboard for "Continue with Login"**: today each app that
+  can use Login is added by hand to the server's settings. Next, developers
+  register their own apps (name, exact callback, proven domain) and get a
+  client ID without a redeploy.
 - **A mainnet version**, without the testnet-only exceptions above.
 
 ## Run it locally
