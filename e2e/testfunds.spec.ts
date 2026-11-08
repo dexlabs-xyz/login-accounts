@@ -1,7 +1,7 @@
 /**
  * Test funds, live on Sepolia (TESTNET ONLY): a new account claims 1,000 test
- * USDT from the private pool, and we measure how long until it's spendable.
- * Needs TESTNET_POOL_MNEMONIC in .env and the pool's shield cleared.
+ * USDT (shielded straight from the pool's public balance), and we measure how
+ * long until it's spendable. Needs TESTNET_POOL_MNEMONIC in .env.
  */
 import { expect, test } from '@playwright/test';
 import { Device, disableAutofill, signUp } from './helpers.ts';
@@ -31,7 +31,9 @@ test('a new account claims 1,000 test USDT once; it becomes spendable', async ({
         const button = funds.getByRole('button', { name: /Get 1000 test USDT/ });
         if (await button.isEnabled().catch(() => false)) await button.click();
         await page.waitForTimeout(3_000);
-        const err = (await funds.getByRole('alert').textContent().catch(() => '')) ?? '';
+        // Don't wait for an error that may never come (a successful claim shows none).
+        const alert = funds.getByRole('alert');
+        const err = (await alert.isVisible()) ? ((await alert.textContent({ timeout: 1_000 }).catch(() => '')) ?? '') : '';
         if (err) say(`+${Math.round((Date.now() - t0) / 1000)}s claim refused: ${err}`);
         return funds.getByTestId('testfunds-status').isVisible();
       },

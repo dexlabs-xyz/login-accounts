@@ -1,7 +1,7 @@
 /**
  * "Get test funds" (TESTNET ONLY): one claim of 1,000 test USDT per account,
- * sent privately from Login's test-funds pool, plus a small hidden reserve
- * that pays network fees. Exception to D6, labelled on screen: to send it, the
+ * shielded by Login's test-funds pool straight into the account's private
+ * balance, plus a small hidden reserve that pays network fees. Exception to D6, labelled on screen: to send it, the
  * server is told this account's private address for this one claim.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
@@ -63,7 +63,7 @@ export function TestFunds() {
         <>
           <p className="muted small">
             Try Login without hunting for faucets: get {view.amountUsdt} test USDT in your private balance, once per account.
-            Ready to spend in about an hour, after Railgun’s privacy check. Test tokens have no value.
+            Ready to spend in one to two hours, after Railgun’s privacy check. Test tokens have no value.
           </p>
           <button className="primary" disabled={busy || !pw.railgunAddress} onClick={() => void claim()}>
             {busy ? 'Claiming…' : `Get ${view.amountUsdt} test USDT`}
@@ -76,18 +76,18 @@ export function TestFunds() {
       )}
       {(view.status === 'queued' || view.status === 'sending') && (
         <p role="status" className="info" data-testid="testfunds-status">
-          Sending your test funds privately… This takes a minute or two.
+          Sending your test funds into your private balance… This takes a minute or two.
         </p>
       )}
       {view.status === 'sent' && (
         <div className="stack">
           <p role="status" className="info" data-testid="testfunds-status">
-            Sent {view.amountUsdt} test USDT to your private balance. Ready to spend in about an hour: it shows as “being
-            checked” until Railgun’s privacy check clears.
+            Sent {view.amountUsdt} test USDT to your private balance. Ready to spend in one to two hours: it shows as
+            “being checked” until Railgun’s privacy check clears.
           </p>
           {view.txHash && (
             <a className="small" href={`https://sepolia.etherscan.io/tx/${view.txHash}`} target="_blank" rel="noreferrer">
-              View on Sepolia Etherscan (shows only that a private transfer happened)
+              View on Sepolia Etherscan (shows the pool moving test USDT into Railgun, not who received it)
             </a>
           )}
         </div>

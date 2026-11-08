@@ -65,7 +65,7 @@ and must never reach mainnet:
   placeholder address; nothing can be sent.
 
 Also worth knowing: new deposits wait for Railgun's privacy check ("being
-checked"), usually about an hour, before they can be spent.
+checked"), usually one to two hours, before they can be spent.
 
 ## Run it locally
 
