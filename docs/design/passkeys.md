@@ -158,6 +158,18 @@ easy to get wrong (USDC sent to a USDT address sat unnoticed overnight).
     session and asks the user to review again, which picked one that worked.
   - A withdrawal needs private ETH for the broadcaster fee. Accounts funded
     before the fee balance existed had none; the screen now says so plainly.
+  - **Linked-address warning (decided 2026-11-08, team lead).** Withdrawing to
+    an address that funded one of your deposits links the two publicly. The
+    review now warns about it (allowed, not blocked). The app notes each
+    deposit's senders on this device only, inside the encrypted deposit
+    records: token senders from public Transfer logs *into* the deposit
+    address at shield time, ETH senders from the few blocks between two
+    balance checks. The RPC is asked only about deposit addresses it already
+    sees us watching, never about the withdraw address; Login's server learns
+    nothing. Limits: the public RPC keeps logs for ~10,000 blocks (~1.4
+    days), so deposits made before this change, or rebuilt on a new device,
+    aren't covered; ETH that arrives while the app is closed isn't either. The
+    general "use an address that isn't linked to you" advice stays.
 
 ### Smart accounts
 

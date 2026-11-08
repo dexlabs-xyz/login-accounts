@@ -11,7 +11,7 @@ const say = log('send');
 
 test('A sends USDT privately to B through a broadcaster', async ({ page, browser }) => {
   // --- A: a funded account with spendable USDT and ETH for fees.
-  await fundedAccount(page, '2', say);
+  await fundedAccount(page, say);
 
   // --- B: a second account in its own browser context; we only need its private address.
   const ctxB = await browser.newContext();

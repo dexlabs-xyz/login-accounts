@@ -74,6 +74,14 @@ export interface DepositRecord {
   userEthWei?: string;
   /** EVM deposits: swaps into USDT, in order. Kept so a reload never sends twice. */
   swaps?: DepositSwap[];
+  /**
+   * Public addresses that sent money to this deposit address (lowercase), so a
+   * withdrawal back to one can be flagged: anyone can link the two on-chain.
+   * Found on this device from public chain data; stored only here, encrypted.
+   */
+  funders?: string[];
+  /** Last block already searched for token transfers in (so a rescan doesn't repeat work). */
+  fundersCheckedBlock?: number;
   createdAt: number;
   updatedAt: number;
 }

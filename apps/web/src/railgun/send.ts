@@ -56,6 +56,8 @@ export interface SendContext {
   unshieldFeeBasisPoints: () => bigint | null;
   /** The user's own Login deposit addresses (lowercase): withdrawing to one links them publicly. */
   ownDepositAddresses: () => Promise<Set<string>>;
+  /** Public addresses that funded the user's deposits (lowercase): withdrawing to one links them publicly. */
+  depositFunders: () => Promise<Set<string>>;
   onProgress: (progress: number) => void;
 }
 
@@ -132,6 +134,8 @@ export function createSender(ctx: SendContext) {
         // A deposit address is publicly tied to this user's shields; sending there undoes the privacy.
         if ((await ctx.ownDepositAddresses()).has(to.toLowerCase())) throw new SendError('own-deposit-address');
       }
+      // Allowed, but flagged on review: this address sent money into one of the user's deposits.
+      const fundedDeposits = kind === 'unshield' && (await ctx.depositFunders()).has(to.toLowerCase());
       const amount = BigInt(amountText);
       const spendable = ctx.spendable();
       if (amount <= 0n || (spendable.get(SEPOLIA_USDT.toLowerCase()) ?? 0n) < amount) throw new SendError('insufficient-usdt');
@@ -202,6 +206,7 @@ export function createSender(ctx: SendContext) {
         feeWei: fee.toString(),
         railgunFee: railgunFee.toString(),
         receives: (amount - railgunFee).toString(),
+        fundedDeposits,
         expiresAt,
       };
     },

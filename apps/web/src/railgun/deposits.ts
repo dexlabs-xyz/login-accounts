@@ -17,7 +17,7 @@ import {
   populateShieldBaseToken,
 } from '@railgun-community/wallet';
 import { EVMGasType, NETWORK_CONFIG, NetworkName, TXIDVersion } from '@railgun-community/shared-models';
-import { Contract, HDNodeWallet, JsonRpcProvider, getAddress, isAddress, keccak256, ZeroAddress, type Provider } from 'ethers';
+import { Contract, HDNodeWallet, JsonRpcProvider, getAddress, isAddress, keccak256, zeroPadValue, ZeroAddress, type Provider } from 'ethers';
 import { openJson, sealJson, type Bytes, type SealedJson } from '@login/vault';
 import {
   DEPOSIT_ETH_GAS_KEEP_WEI,
@@ -45,6 +45,11 @@ const ERC20 = [
 ];
 /** Stop scanning after this many unused addresses in a row (like standard wallets). */
 const GAP_LIMIT = 20;
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+/** The public RPC keeps logs for about 10,000 blocks (~1.4 days) and caps a query there too. */
+const LOG_WINDOW_BLOCKS = 9_000;
+/** Look for who sent ETH only across short gaps between two balance checks. */
+const ETH_SCAN_MAX_BLOCKS = 30;
 const RECORDS_PURPOSE = 'deposit-records';
 
 export interface DepositContext {
@@ -56,6 +61,17 @@ export interface DepositContext {
 }
 
 const pathFor = (index: number) => `m/44'/60'/0'/0/${index}`;
+
+/** Senders of ERC-20 Transfer logs (topic 1), lowercase. Pure, for tests. */
+export function sendersFromLogs(logs: readonly { topics: readonly string[] }[]): string[] {
+  return logs.filter((l) => l.topics[0] === TRANSFER_TOPIC && l.topics[1]).map((l) => `0x${l.topics[1]!.slice(-40)}`.toLowerCase());
+}
+/** Senders of plain transactions to `address`, lowercase. Pure, for tests. */
+export function sendersOfTxs(txs: readonly { from: string; to: string | null; value: bigint }[], address: string): string[] {
+  const to = address.toLowerCase();
+  return txs.filter((t) => t.to?.toLowerCase() === to && t.value > 0n).map((t) => t.from.toLowerCase());
+}
+const union = (a: readonly string[] | undefined, b: readonly string[]) => [...new Set([...(a ?? []), ...b])];
 
 // ---------- encrypted records in IndexedDB ----------
 
@@ -108,6 +124,47 @@ export function createDeposits(ctx: DepositContext) {
     Object.assign(r, changes, { updatedAt: Date.now() });
     await save(records);
     return r;
+  }
+
+  /**
+   * Note who sent tokens to a deposit address, from public Transfer logs. Asks
+   * the RPC only for transfers *into* this address (which it already sees us
+   * watching), never about any withdraw address. Best effort: never blocks a deposit.
+   */
+  async function noteTokenFunders(r: DepositRecord) {
+    try {
+      const latest = await provider.getBlockNumber();
+      const fromBlock = Math.max(latest - LOG_WINDOW_BLOCKS, (r.fundersCheckedBlock ?? 0) + 1);
+      if (fromBlock > latest) return;
+      const logs = await provider.getLogs({
+        address: DEPOSIT_TOKENS.map((t) => t.address),
+        topics: [TRANSFER_TOPIC, null, zeroPadValue(r.address, 32)],
+        fromBlock,
+        toBlock: latest,
+      });
+      await patch(r.index, { funders: union(r.funders, sendersFromLogs(logs)), fundersCheckedBlock: latest });
+    } catch {
+      // The warning is a convenience; the review screen's general advice still applies.
+    }
+  }
+
+  /** Last balance check per deposit, to spot ETH arriving and find who sent it. Memory only. */
+  const lastEth = new Map<number, { block: number; eth: bigint }>();
+  async function noteEthFunders(r: DepositRecord, eth: bigint, block: number) {
+    const prev = lastEth.get(r.index);
+    lastEth.set(r.index, { block, eth });
+    if (!prev || eth <= prev.eth || block - prev.block > ETH_SCAN_MAX_BLOCKS) return;
+    try {
+      const found: string[] = [];
+      // A little margin: load-balanced RPC nodes can lag each other by a block or two.
+      for (let n = Math.max(0, prev.block - 2); n <= block; n++) {
+        const b = await provider.getBlock(n, true);
+        found.push(...sendersOfTxs(b?.prefetchedTransactions ?? [], r.address));
+      }
+      if (found.length) await patch(r.index, { funders: union(r.funders, found) });
+    } catch {
+      // Best effort, as above.
+    }
   }
 
   /** Has this address ever been used? Any nonce, ETH, USDT or USDC counts. */
@@ -227,6 +284,7 @@ export function createDeposits(ctx: DepositContext) {
         usdt.balanceOf!(r.address) as Promise<bigint>,
         usdc.balanceOf!(r.address) as Promise<bigint>,
       ]);
+      void provider.getBlockNumber().then((block) => noteEthFunders(r, eth, block), () => {});
       return { eth: eth.toString(), usdt: a.toString(), usdc: b.toString() };
     },
 
@@ -241,6 +299,7 @@ export function createDeposits(ctx: DepositContext) {
       const r = (await load()).find((x) => x.index === index);
       if (!r) throw new Error('Unknown deposit.');
       const wallet = HDNodeWallet.fromPhrase(ctx.mnemonic, undefined, pathFor(index)).connect(provider);
+      await noteTokenFunders(r); // while the public logs still have the deposit
       const held = (
         await Promise.all(
           DEPOSIT_TOKENS.map(async (t) => ({ ...t, amount: (await t.contract.balanceOf!(wallet.address)) as bigint })),

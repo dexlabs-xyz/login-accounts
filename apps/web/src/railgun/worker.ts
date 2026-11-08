@@ -218,6 +218,7 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
         spendable: () => spendable,
         unshieldFeeBasisPoints: () => (unshieldFeeBasisPoints === null ? null : BigInt(unshieldFeeBasisPoints)),
         ownDepositAddresses: async () => new Set((await deposits!.list()).map((r) => r.address.toLowerCase())),
+        depositFunders: async () => new Set((await deposits!.list()).flatMap((r) => r.funders ?? [])),
         onProgress: (progress) => post({ type: 'send-progress', progress }),
       });
 

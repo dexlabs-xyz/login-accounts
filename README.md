@@ -21,8 +21,9 @@ chains, built on **NEAR Intents** and **Railgun**.
    swap pays on **mainnet NEAR Intents** right now (a read-only price check).
 4. **Send privately** to another Login account (a `0zk…` address). Nobody
    on-chain can see the amount, the sender or the recipient.
-5. **Withdraw** to any Ethereum address. The review shows every fee and warns
-   you that this part is public.
+5. **Withdraw** to any Ethereum address. The review shows every fee, warns
+   you that this part is public, and flags it if the address is one that sent
+   money into your account (anyone could link the two).
 6. **Verify you're human** (optional, Sumsub sandbox), and **continue with
    Login** on other apps: they learn only that you're a verified human, with a
    different ID per app.
@@ -66,6 +67,15 @@ and must never reach mainnet:
 
 Also worth knowing: new deposits wait for Railgun's privacy check ("being
 checked"), usually one to two hours, before they can be spent.
+
+### Not built yet (next)
+
+- **Smart accounts at the edges** (EIP-7702 + a paymaster): deposit addresses
+  paying their own gas in USDT, replacing the testnet gas faucet. Planned
+  (notes in the design doc), not built.
+- **Split-key recovery** for losing every passkey.
+- **Withdrawals to Solana** (today: Ethereum addresses only).
+- **A mainnet version**, without the testnet-only exceptions above.
 
 ## Run it locally
 

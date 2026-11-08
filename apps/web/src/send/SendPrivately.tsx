@@ -72,6 +72,8 @@ interface Quote {
   to: string;
   feeWei: string;
   railgunFee: string;
+  /** Withdrawals: this address sent money into one of the user's deposits. */
+  fundedDeposits?: boolean;
   receives: string;
   expiresAt: number;
 }
@@ -214,6 +216,12 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
                 came from you. To keep it that way, use an address that isn’t linked to you, and don’t withdraw the exact
                 amount you just deposited.
               </p>
+              {step.fundedDeposits && (
+                <p className="error small" role="alert" data-testid="withdraw-linked-warning">
+                  <strong>This address sent money into your Login account.</strong> Anyone can see both on-chain, so this
+                  withdrawal can be tied to you. To keep it private, withdraw to a fresh address instead.
+                </p>
+              )}
             </>
           )}
           <p className="small">

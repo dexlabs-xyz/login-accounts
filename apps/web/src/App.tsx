@@ -226,7 +226,7 @@ function PrivateBalance() {
           {reserveState === 'ready'
             ? 'Network fees are covered.'
             : reserveState === 'pending'
-              ? 'Network fees: being set up with your deposit (cleared with it).'
+              ? 'Network fees: being set up. Covered once your new funds clear.'
               : 'Your next deposit sets aside a little to cover network fees for sending and withdrawing.'}
         </p>
       )}

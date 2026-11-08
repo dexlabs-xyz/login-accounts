@@ -78,7 +78,7 @@ function stageText(stage: Stage | undefined, record: DepositRecord): string {
     case 'shielding':
       return 'Moving it into your private balance…';
     case 'done':
-      return 'Done. It’s in your private balance. A privacy check runs first, so it shows as “being checked” before you can spend it, usually about an hour, sometimes longer. Your wallet may lock while you wait; the balance catches up when you unlock.';
+      return 'Done. It’s in your private balance. A privacy check runs first, so it shows as “being checked” before you can spend it, from a few minutes to about two hours. Your wallet may lock while you wait; the balance catches up when you unlock.';
     case 'refunded':
       return record.quote?.originChain === 'sol'
         ? 'The swap didn’t happen. Your tokens were refunded to your Solana wallet.'

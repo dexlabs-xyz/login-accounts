@@ -49,8 +49,9 @@ const testFunds = poolPhrase
 const { app } = createApp({ config, db: openDb(config.dbPath), mailer, outbox, kyc, gasSender, testFunds });
 
 // Locally only this machine; on a host (Railway) set HOST=0.0.0.0 so its proxy can reach it.
-serve({ fetch: app.fetch, port: config.port, hostname: process.env.HOST ?? '127.0.0.1' }, ({ port }) => {
-  console.log(`Login API on http://127.0.0.1:${port} (RP ID: ${config.rpId})`);
+const hostname = process.env.HOST ?? '127.0.0.1';
+serve({ fetch: app.fetch, port: config.port, hostname }, ({ port }) => {
+  console.log(`Login API listening on ${hostname}:${port} (RP ID: ${config.rpId})`);
   if (config.devOutbox) console.log('Dev outbox on: email codes are shown at /dev/outbox.');
   console.log(
     !kycConfig
