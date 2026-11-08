@@ -1,7 +1,7 @@
 /**
- * Test funds, live on Sepolia (TESTNET ONLY): a new account claims 1,000 test
- * USDT from the private pool, and we measure how long until it's spendable.
- * Needs TESTNET_POOL_MNEMONIC in .env and the pool's shield cleared.
+ * Test funds, live on Sepolia (TESTNET ONLY): a new account claims 250 test
+ * USDT (shielded straight from the pool's public balance), and we measure how
+ * long until it's spendable. Needs TESTNET_POOL_MNEMONIC in .env.
  */
 import { expect, test } from '@playwright/test';
 import { Device, disableAutofill, signUp } from './helpers.ts';
@@ -10,7 +10,7 @@ import { log } from './live.ts';
 test.describe.configure({ timeout: 180 * 60_000 });
 const say = log('testfunds');
 
-test('a new account claims 1,000 test USDT once; it becomes spendable', async ({ page }) => {
+test('a new account claims 250 test USDT once; it becomes spendable', async ({ page }) => {
   await disableAutofill(page);
   page.on('console', (m) => m.type() === 'error' && /railgun/i.test(m.text()) && say(`console: ${m.text().slice(0, 300)}`));
   await Device.add(page);
@@ -28,10 +28,12 @@ test('a new account claims 1,000 test USDT once; it becomes spendable', async ({
       async () => {
         await page.keyboard.press('Shift'); // stay "active" (15-minute idle lock)
         if (await funds.getByTestId('testfunds-status').isVisible()) return true;
-        const button = funds.getByRole('button', { name: /Get 1000 test USDT/ });
+        const button = funds.getByRole('button', { name: /Get 250 test USDT/ });
         if (await button.isEnabled().catch(() => false)) await button.click();
         await page.waitForTimeout(3_000);
-        const err = (await funds.getByRole('alert').textContent().catch(() => '')) ?? '';
+        // Don't wait for an error that may never come (a successful claim shows none).
+        const alert = funds.getByRole('alert');
+        const err = (await alert.isVisible()) ? ((await alert.textContent({ timeout: 1_000 }).catch(() => '')) ?? '') : '';
         if (err) say(`+${Math.round((Date.now() - t0) / 1000)}s claim refused: ${err}`);
         return funds.getByTestId('testfunds-status').isVisible();
       },
@@ -40,10 +42,10 @@ test('a new account claims 1,000 test USDT once; it becomes spendable', async ({
     .toBe(true);
   say(`claim accepted after ${Math.round((Date.now() - t0) / 1000)}s`);
 
-  await expect(funds.getByTestId('testfunds-status')).toHaveText(/^Sent 1000 test USDT/, { timeout: 10 * 60_000 });
+  await expect(funds.getByTestId('testfunds-status')).toHaveText(/^Sent 250 test USDT/, { timeout: 10 * 60_000 });
   const href = await funds.getByRole('link', { name: /View on Sepolia Etherscan/ }).getAttribute('href');
   say(`sent: ${href}`);
-  await expect(funds.getByRole('button', { name: /Get 1000 test USDT/ })).toHaveCount(0); // once only
+  await expect(funds.getByRole('button', { name: /Get 250 test USDT/ })).toHaveCount(0); // once only
 
   // Measure: how long until a received private transfer is spendable (decides how instant this feels).
   const t1 = Date.now();

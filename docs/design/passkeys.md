@@ -230,7 +230,7 @@ Code: `apps/web/src/deposits/mainnet.ts`.
 
 **Never** extend this to non-dry quotes, real deposit addresses or real funds.
 
-### Test funds ("Get 1,000 test USDT"): contradicts D6
+### Test funds ("Get 250 test USDT"): contradicts D6
 
 **Decided 2026-11-06 (team lead), built 2026-11-07.** Judges and testers get
 test USDT in one click instead of hunting for faucets. Tidepool's creator
@@ -238,13 +238,28 @@ granted 200k test USDT; converted to 199,480 Sepolia USDT and shielded into
 the pool's private Railgun balance (with 0.15 ETH as WETH for fee reserves).
 Code: `apps/server/src/test-funds/`.
 
-- A signed-in account (verified email + passkey) claims **once**: a private
-  transfer of 1,000 test USDT plus 0.001 private ETH (its hidden fee
-  reserve). Global cap: 100 claims a day. The pool pays the gas from its own
-  public address (no broadcaster), then publishes the transfer's Proof of
-  Innocence data so the claimer's funds clear.
+- A signed-in account (verified email + passkey) claims **once**: 250 test
+  USDT plus 0.001 ETH as WETH (its hidden fee reserve). Global cap: 100
+  claims a day.
+- **Revised 2026-11-08: claims are shields.** Each claim is one shield from the
+  pool's public address straight into the claimer's 0zk address (Railgun's
+  0.25% shield fee added on top, so exactly the claim arrives). Public ETH is
+  wrapped to WETH in 0.01 batches. On-chain this shows the pool moving the
+  claim's USDT into Railgun, not who received it. Spendable after Railgun's usual
+  shield check (about an hour). Tidepool topped the pool up with 50,000
+  Sepolia USDT for this. Claim size cut from 1,000 to 250 USDT on 2026-11-08
+  (team lead: enough to test anything; the 48k then covers ~190 claims).
+- **Why not private transfers (the first version):** a self-signed private
+  transfer needs the pool to publish its own Proof of Innocence data, which
+  depends on Railgun's Sepolia transaction index (TXID tree). Railgun's public
+  Sepolia indexer has a broken checksum chain at position 4188 (block
+  11816741; reported to Railgun), so the engine's index stops at 4177 and the
+  first claim's change (~198k USDT, 0.149 WETH) is stuck in "missing privacy
+  check". The pool's private upkeep still runs: if Railgun repairs the index,
+  that balance clears on its own (`src/scripts/pool-poi-status.ts` checks,
+  `pool-poi-fix.ts` publishes the proofs by hand).
 - **Why it contradicts D6:** to send a claim, the server is told the
-  account's 0zk address. It keeps it in memory only until the transfer is
+  account's 0zk address. It keeps it in memory only until the shield is
   sent, stores only "this account claimed, when, and the pool's public
   transaction" (`test_fund_claims`), and logs nothing. The screen says so.
 - The pool's recovery phrase is a host secret (`TESTNET_POOL_MNEMONIC`);

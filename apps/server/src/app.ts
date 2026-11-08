@@ -69,7 +69,8 @@ export function createApp(deps: AppDeps) {
     const issuer = issuerUrl(oidcIssuer);
     const compatible = issuer.protocol === 'http:'
       ? deps.config.rpId === 'localhost'
-      : deps.config.rpId === 'withlogin.com' && deps.config.secureCookies && deps.config.origins.includes(issuer.origin);
+      : (issuer.hostname === deps.config.rpId || issuer.hostname.endsWith('.' + deps.config.rpId)) &&
+        deps.config.secureCookies && deps.config.origins.includes(issuer.origin);
     if (!compatible) throw new Error('OIDC issuer and passkey origin/RP configuration must agree.');
     // KYC owns the level lookup; OIDC only passes the scopes the user granted (agreed on PR #4).
     const getKycClaims = deps.getKycClaims ?? createGetKycClaims(deps.db);

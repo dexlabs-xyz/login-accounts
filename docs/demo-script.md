@@ -1,7 +1,7 @@
 # Demo script (about 4 minutes)
 
-**Before the demo (the day before):** Railgun's privacy check takes about an
-hour, sometimes longer, before new funds can be spent. So prepare two accounts
+**Before the demo (the day before):** Railgun's privacy check takes one to two
+hours, before new funds can be spent. So prepare two accounts
 a day ahead:
 
 - **Alice** (presenter): claimed test funds; one Ethereum deposit done (some
@@ -20,7 +20,7 @@ a day ahead:
 
 ## 2. One-click test funds (20 s)
 
-- Press **Get 1000 test USDT** → "Sending your test funds privately…" → Sent.
+- Press **Get 250 test USDT** → "Sending your test funds…" → Sent.
 - Say: *no faucets. It arrives privately and clears Railgun's privacy check.*
 
 ## 3. Add money from any wallet (60 s), as Alice

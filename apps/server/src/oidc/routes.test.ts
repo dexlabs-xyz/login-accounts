@@ -20,6 +20,7 @@ async function signInToDemoApp(
     getKycClaims?: GetKycClaims;
     setup?: (db: DB) => void;
     hosted?: boolean;
+    hostedRpId?: string;
   } = {},
 ) {
   const issuer = opts.hosted ? DEMO_ISSUER : 'http://localhost:5180/oidc';
@@ -53,7 +54,12 @@ async function signInToDemoApp(
   const { app, sessions } = createApp({
     ...(opts.getKycClaims ? { getKycClaims: opts.getKycClaims } : {}),
     config: loadConfig(
-      opts.hosted ? { WEBAUTHN_RP_ID: 'withlogin.com', WEBAUTHN_ORIGINS: publicOrigin } : {},
+      opts.hosted
+        ? {
+            WEBAUTHN_RP_ID: opts.hostedRpId ?? 'demo.withlogin.com',
+            WEBAUTHN_ORIGINS: publicOrigin,
+          }
+        : {},
     ),
     db,
     mailer: { async send() {} },
@@ -201,7 +207,7 @@ it('a user who has not passed KYC gets no verified_human claim at all (never fal
   expect(Object.hasOwn(info, 'verification_sandbox')).toBe(false);
 });
 
-it('serves canonical HTTPS discovery, redirects, Secure cookies and the KYC hand-off behind an untrusted proxy Host', async () => {
+it('serves HTTPS discovery, Secure cookies and KYC with the live demo.withlogin.com RP behind a proxy', async () => {
   const info = await signInToDemoApp({
     hosted: true,
     setup: (db) =>
@@ -212,4 +218,34 @@ it('serves canonical HTTPS discovery, redirects, Secure cookies and the KYC hand
   expect(info.verified_human).toBe(true);
   expect(info.verification_sandbox).toBe(true);
   expect(Object.hasOwn(info, 'kyc_level')).toBe(false);
+});
+
+it('also accepts the parent withlogin.com RP without changing the configured passkey domain', async () => {
+  const info = await signInToDemoApp({ hosted: true, hostedRpId: 'withlogin.com' });
+  expect(typeof info.sub).toBe('string');
+});
+
+it.each([
+  { rpId: 'localhost' },
+  { rpId: 'other.withlogin.com' },
+  { rpId: 'login.com' },
+  { rpId: 'withlogin.com.attacker.invalid' },
+  { secureCookies: false },
+  { origins: ['https://other.withlogin.com'] },
+])('rejects an incompatible hosted passkey configuration: %j', (override) => {
+  const db = openDb(':memory:');
+  try {
+    const config = {
+      ...loadConfig({
+        WEBAUTHN_RP_ID: 'demo.withlogin.com',
+        WEBAUTHN_ORIGINS: 'https://demo.withlogin.com',
+      }),
+      ...override,
+    };
+    expect(() =>
+      createApp({ config, db, mailer: { async send() {} }, oidcIssuer: DEMO_ISSUER }),
+    ).toThrow('OIDC issuer and passkey origin/RP configuration must agree.');
+  } finally {
+    db.close();
+  }
 });

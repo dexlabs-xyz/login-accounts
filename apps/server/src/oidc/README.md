@@ -5,8 +5,17 @@ The approved `oidc-provider` library runs inside the shared Login API process,
 under `/oidc/*`. Root discovery redirects to
 `/oidc/.well-known/openid-configuration`. Passkeys and KYC run in that same API.
 
+Railway’s live API build command remains `npm install --no-audit --no-fund`;
+`npm ci` below is for local development. Existing Vercel rewrites are already
+configured in `apps/web/vercel.json` and remain in place.
+
 For the Vercel/Railway public demo, see the complete
 [deployment and Gold DNS handoff](../../../../docs/oidc-public-demo.md).
+The live hosted demo keeps `WEBAUTHN_RP_ID=demo.withlogin.com` so existing
+passkeys continue working. Its issuer host must equal the configured RP or fall
+under it at a dot boundary; Secure cookies and the exact passkey origin are still
+required. Any later RP migration is separate from this OIDC rollout.
+
 The only public issuer allowed is `https://demo.withlogin.com/oidc`. All other
 non-local issuers are refused. `OIDC_ENABLED=1` opts in; otherwise OIDC is off.
 Local default: `http://localhost:5180/oidc`. The `/oidc` suffix is required.

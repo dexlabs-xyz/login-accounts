@@ -8,22 +8,35 @@ is enabled by this change.
 
 ## Login API on Railway
 
-Use Node 22.13+ and the repository root. Install with `npm ci --omit=dev` and start
-with `npm -w @login/server start` (tsx is a runtime dependency). Set:
+Use Node 22.13+ and the repository root. Keep Railway’s existing build command
+**`npm install --no-audit --no-fund`**, and start with
+`npm -w @login/server start` (tsx is a runtime dependency). Do not replace the
+Railway command with `npm ci`: its mounted dependency cache can produce an
+`EBUSY` error when npm tries to remove it. Local clean installs can still use
+`npm ci`. Set:
 
 | Variable                        | Value / action                                                            |
 | ------------------------------- | ------------------------------------------------------------------------- |
+| `NODE_ENV`                      | `production`                                                              |
 | `HOST`                          | `0.0.0.0`                                                                 |
 | `PORT`                          | Railway supplies this                                                     |
 | `OIDC_ENABLED`                  | `1`                                                                       |
 | `OIDC_ISSUER`                   | `https://demo.withlogin.com/oidc`                                         |
-| `WEBAUTHN_RP_ID`                | `withlogin.com` — permanent passkey RP                                    |
+| `WEBAUTHN_RP_ID`                | `demo.withlogin.com` — preserve the live demo’s existing passkeys         |
 | `WEBAUTHN_ORIGINS`              | `https://demo.withlogin.com`                                              |
 | `DB_PATH`                       | `/data/login.sqlite`, with a Railway persistent volume mounted at `/data` |
 | `DEV_OUTBOX`                    | unset; never expose development email codes publicly                      |
 | `RESEND_API_KEY`, `MAIL_FROM`   | existing approved email configuration, entered privately                  |
 | `OIDC_JWKS`, `OIDC_COOKIE_KEYS` | private generated values, as described below                              |
 | `OIDC_CLIENTS`                  | exact client list below                                                   |
+
+The live demo already has passkeys bound to `demo.withlogin.com`. Keep that RP
+ID during this OIDC rollout; changing it would make those credentials unavailable
+under the new RP. Any future RP migration is separate work. OIDC accepts an RP
+when the pinned issuer host equals it or is a subdomain of it, with a dot boundary
+(`demo.withlogin.com` or its parent `withlogin.com`). Secure cookies and the exact
+`https://demo.withlogin.com` passkey origin remain required. The issuer allowlist
+is unchanged.
 
 The API refuses the hosted OIDC issuer if the passkey RP/origin/cookie settings
 conflict, or keys/clients are missing. The executable also refuses an absent or
@@ -81,7 +94,7 @@ by the team and have TLS**. Omit an app until its deployment is ready.
   {
     "client_id": "chess-demo",
     "client_name": "Login Chess — unaudited testnet demo",
-    "redirect_uris": ["https://chess-demo.withlogin.com/api/login/callback"]
+    "redirect_uris": ["https://onchainchess.app/api/login/callback"]
   },
   {
     "client_id": "second-demo",
@@ -100,9 +113,10 @@ Changing a client ID changes that app's pairwise identity; keep IDs stable.
 
 ## Vercel and proxy routing
 
-Use `apps/web/vercel.json`, replacing its Railway-host placeholder with Gold's
-actual API service hostname. Forward `/api/*`, `/oidc`, `/oidc/*` and
-`/.well-known/*` before the SPA fallback. Preserve the path and query string.
+The Vercel rewrites in `apps/web/vercel.json` are already live and point to the
+shared Railway API. Preserve those destinations and rule order. They forward
+`/api/*`, `/oidc`, `/oidc/*` and `/.well-known/*` before the SPA fallback, keeping
+the path and query string. No rewrite replacement is needed for this OIDC rollout.
 Do not cache protocol endpoints or callbacks; preserve `Set-Cookie` and
 `Cache-Control: no-store`. No key or cookie value belongs in Vite's `VITE_*` env.
 
@@ -124,7 +138,7 @@ build/start commands, exact environment and durable database path.
 The second app is the small claim-validation demo, not another chess game. It
 runs as a **separate** Railway process from this checkout:
 
-- Install `npm ci --include=dev` for this separate demo service: `openid-client`
+- Use `npm install --no-audit --no-fund --include=dev` for this separate Railway demo service: `openid-client`
   remains a devDependency and does not ship in the shared API's production install.
 - Start `npm -w @login/server run start:oidc-demo`.
 - Set `OIDC_DEMO_ENABLED=1`, `OIDC_DEMO_ORIGIN=https://second-demo.withlogin.com`,
@@ -140,23 +154,24 @@ runs as a **separate** Railway process from this checkout:
 
 Code preparation does not create hosting services or DNS records. Gold should:
 
-1. Create the Railway services and persistent volumes, enter secrets privately,
-   and record their provider-assigned domain targets.
-2. Add `demo.withlogin.com` to the Login Vercel project, and
-   `chess-demo.withlogin.com` (optionally `second-demo.withlogin.com`) as custom
-   domains on their Railway services.
+1. Keep the existing Login Railway service and persistent volume. Enter the
+   OIDC secrets privately without changing its passkey RP or existing credentials.
+2. Keep the live `demo.withlogin.com` Vercel domain and rewrites. For the Chess
+   app’s `onchainchess.app` domain (optionally `second-demo.withlogin.com`), follow
+   the companion app’s Railway custom-domain handoff.
 3. At the DNS provider, use the **exact CNAME/verification records shown by
    Vercel/Railway** for each subdomain. Do not guess target names. Wait for DNS
    validation and TLS provisioning before registering the corresponding client.
-4. Replace Vercel's API rewrite destination and verify email/KYC sandbox settings.
+4. Verify the existing Vercel routes and email/KYC sandbox settings without
+   replacing the live rewrite destinations or Railway build command.
 5. Test public discovery, passkey sign-up/sign-in, consent/cancel/fresh sign-in,
    chess multiplayer over WSS, and sandbox KYC. Leave no OTP/token-bearing
    screenshots or request logs enabled.
 6. Restart the Login API and verify a previously signed-in browser can continue,
    a previously issued token remains verifiable, and the app ID stays the same.
 
-A hosted site has not been published as part of the code change. DNS and the
-public smoke test require Gold's hosting access and supplied domain targets.
+This code change does not redeploy or reconfigure the existing live sites.
+Additional app domains and the public smoke test require Gold’s hosting access.
 
 ## Validation
 

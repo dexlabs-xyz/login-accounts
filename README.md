@@ -13,7 +13,7 @@ chains, built on **NEAR Intents** and **Railgun**.
 1. **Sign up with a passkey.** Email + 6-digit code, then a passkey (Face ID,
    Touch ID, a phone or a security key). No passwords, no seed phrase to write
    down.
-2. **Get test funds.** One click: 1,000 test USDT lands in your *private*
+2. **Get test funds.** One click: 250 test USDT lands in your *private*
    balance, once per account. No faucets to hunt for.
 3. **Add money from anywhere.** *From an Ethereum wallet*: send USDT, USDC or
    ETH (any amount) to a fresh address made just for you; it all becomes
@@ -57,7 +57,7 @@ and must never reach mainnet:
 - **Gas faucet:** Login's server sends a little Sepolia ETH to your fresh
   deposit address so it can move your tokens. (On mainnet, NEAR Intents
   delivers gas with the deposit.)
-- **Test funds:** to send your 1,000 test USDT, the server is told your private
+- **Test funds:** to send your 250 test USDT, the server is told your private
   address for that one claim. It stores only that your account claimed.
 - **Hidden fee reserve:** Sepolia broadcasters only accept ETH, so a little
   private ETH is kept for fees and shown as USDT. (On mainnet they accept USDT.)
@@ -65,7 +65,7 @@ and must never reach mainnet:
   placeholder address; nothing can be sent.
 
 Also worth knowing: new deposits wait for Railgun's privacy check ("being
-checked"), usually about an hour, before they can be spent.
+checked"), usually one to two hours, before they can be spent.
 
 ## Run it locally
 
