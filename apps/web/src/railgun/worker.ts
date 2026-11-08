@@ -207,6 +207,7 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
         mnemonic,
         recordsKey,
         railgunAddress: info.railgunAddress,
+        walletId: info.id,
         rpcUrl: SEPOLIA_RPC,
         onChange: (records) => post({ type: 'deposits', records }),
       });

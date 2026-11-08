@@ -56,6 +56,8 @@ export interface DepositContext {
   mnemonic: string;
   recordsKey: Bytes;
   railgunAddress: string;
+  /** Railgun's wallet id: names this account's records slot (several accounts can share a browser). */
+  walletId: string;
   rpcUrl: string;
   onChange: (records: DepositRecord[]) => void;
 }
@@ -92,6 +94,44 @@ async function kv<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReq
   });
 }
 
+/** Before 8 Nov 2026 every account in a browser used this one slot. */
+export const LEGACY_RECORDS_SLOT = 'records';
+export const recordsSlot = (walletId: string) => `records:${walletId}`;
+
+interface SlotStore<S> {
+  get(slot: string): Promise<S | undefined>;
+  put(slot: string, value: S): Promise<void>;
+  remove(slot: string): Promise<void>;
+}
+
+/**
+ * This account's sealed records, or null if it has none yet. Records in the
+ * old shared slot move to this account's slot only if this account's key opens
+ * them; otherwise they belong to another account on this browser, which moves
+ * them when it next unlocks. Pure over a small store, for tests.
+ */
+export async function loadSealedRecords<S, T>(store: SlotStore<S>, slot: string, open: (sealed: S) => Promise<T>): Promise<T | null> {
+  const own = await store.get(slot);
+  if (own !== undefined) return open(own);
+  const legacy = await store.get(LEGACY_RECORDS_SLOT);
+  if (legacy === undefined) return null;
+  let records: T;
+  try {
+    records = await open(legacy);
+  } catch {
+    return null; // another account's records
+  }
+  await store.put(slot, legacy);
+  await store.remove(LEGACY_RECORDS_SLOT);
+  return records;
+}
+
+const idbSlots: SlotStore<SealedJson> = {
+  get: (slot) => kv('readonly', (s) => s.get(slot)) as Promise<SealedJson | undefined>,
+  put: async (slot, value) => void (await kv('readwrite', (s) => s.put(value, slot))),
+  remove: async (slot) => void (await kv('readwrite', (s) => s.delete(slot))),
+};
+
 export function createDeposits(ctx: DepositContext) {
   const provider: Provider = new JsonRpcProvider(ctx.rpcUrl);
   const usdt = new Contract(SEPOLIA_USDT, ERC20, provider);
@@ -107,14 +147,14 @@ export function createDeposits(ctx: DepositContext) {
 
   async function load(): Promise<DepositRecord[]> {
     if (cache) return cache;
-    const sealed = (await kv('readonly', (s) => s.get('records'))) as SealedJson | undefined;
-    cache = sealed ? await openJson<DepositRecord[]>(ctx.recordsKey, RECORDS_PURPOSE, sealed) : [];
+    const slot = recordsSlot(ctx.walletId);
+    cache = (await loadSealedRecords(idbSlots, slot, (sealed) => openJson<DepositRecord[]>(ctx.recordsKey, RECORDS_PURPOSE, sealed))) ?? [];
     return cache;
   }
   async function save(records: DepositRecord[]) {
     cache = records.sort((a, b) => a.index - b.index);
     const sealed = await sealJson(ctx.recordsKey, RECORDS_PURPOSE, cache);
-    await kv('readwrite', (s) => s.put(sealed, 'records'));
+    await idbSlots.put(recordsSlot(ctx.walletId), sealed);
     ctx.onChange(cache);
   }
   async function patch(index: number, changes: Partial<DepositRecord>) {
