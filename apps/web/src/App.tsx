@@ -160,6 +160,8 @@ function PrivateBalance() {
       {pw.status === 'error' && (
         <p className="error" role="alert">
           Couldn’t load your private balance. Lock and unlock to try again.
+          {/* Only the error's type name (e.g. TypeError), never its message: safe to show, and it tells us where to look. */}
+          {pw.error && <span className="muted small"> (Error code: {pw.error})</span>}
         </p>
       )}
       {pw.status === 'starting' && <p className="muted">Opening your private wallet…</p>}
