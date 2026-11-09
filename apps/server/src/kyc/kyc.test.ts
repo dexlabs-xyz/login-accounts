@@ -171,11 +171,16 @@ let fake: FakeSumsub;
 let app: ReturnType<typeof createApp>['app'];
 let kycConfig: KycConfig;
 
-function makeApp(webhookSecret: string | null, withKyc = true) {
+function makeApp(webhookSecret: string | null, withKyc = true, extraEnv: Record<string, string> = {}, clock?: () => number) {
   db = openDb(':memory:');
   fake = new FakeSumsub();
   kycConfig = loadKycConfig(
-    env({ SUMSUB_APP_TOKEN: 'sbx:test', SUMSUB_SECRET_KEY: 'test', ...(webhookSecret ? { SUMSUB_WEBHOOK_SECRET: webhookSecret } : {}) }),
+    env({
+      SUMSUB_APP_TOKEN: 'sbx:test',
+      SUMSUB_SECRET_KEY: 'test',
+      ...(webhookSecret ? { SUMSUB_WEBHOOK_SECRET: webhookSecret } : {}),
+      ...extraEnv,
+    }),
     'localhost',
   )!;
   app = createApp({
@@ -183,6 +188,7 @@ function makeApp(webhookSecret: string | null, withKyc = true) {
     db,
     mailer: devOutboxMailer([]),
     kyc: withKyc ? { config: kycConfig, sumsub: fake } : null,
+    ...(clock ? { now: clock } : {}),
   }).app;
 }
 
@@ -362,22 +368,29 @@ describe('KYC API, local polling mode', () => {
   });
 });
 
-describe('simulated review results (sandbox, localhost only)', () => {
-  beforeEach(() => makeApp(null));
+describe('simulated review results (sandbox, KYC_SIMULATE=1)', () => {
+  beforeEach(() => makeApp(null, true, { KYC_SIMULATE: '1' }));
 
   async function startedWithApplicant(cookie: string) {
     await call('POST', '/api/kyc/start', cookie, { level: 'L1' });
     await call('POST', '/api/kyc/applicant', cookie, { applicantId: 'app222' });
   }
 
-  it('is offered on localhost and records a pass through the normal status API', async () => {
+  it('is offered with the setting and records a pass through the normal status API', async () => {
     const cookie = signedIn();
-    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ simulate: true });
+    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ simulate: true, applicantReady: false });
     await startedWithApplicant(cookie);
+    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ simulate: true, applicantReady: true });
     const r = await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' });
     expect(r.status).toBe(200);
     expect(await r.json()).toMatchObject({ level: 'L1', verifiedHuman: true });
     expect(fake.simulated).toEqual([{ applicantId: 'app222', result: { answer: 'GREEN' } }]);
+  });
+
+  it('never returns the applicant ID itself', async () => {
+    const cookie = signedIn();
+    await startedWithApplicant(cookie);
+    expect(JSON.stringify(await (await call('GET', '/api/kyc', cookie)).json())).not.toContain('app222');
   });
 
   it('simulates a duplicate as final', async () => {
@@ -396,15 +409,81 @@ describe('simulated review results (sandbox, localhost only)', () => {
     expect((await call('POST', '/api/kyc/simulate', cookie, { result: 'toString' })).status).toBe(400);
   });
 
-  it('does not exist outside localhost', async () => {
-    db = openDb(':memory:');
-    fake = new FakeSumsub();
-    const config = loadConfig(env({ WEBAUTHN_RP_ID: 'withlogin.com', WEBAUTHN_ORIGINS: 'https://withlogin.com' }));
-    const kycConfig = loadKycConfig(env({ SUMSUB_APP_TOKEN: 'sbx:t', SUMSUB_SECRET_KEY: 's', SUMSUB_WEBHOOK_SECRET: 'w' }), 'withlogin.com')!;
-    app = createApp({ config, db, mailer: devOutboxMailer([]), kyc: { config: kycConfig, sumsub: fake } }).app;
+  it('does not exist without the setting, even on localhost', async () => {
+    makeApp(null);
     const cookie = signedIn();
-    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ simulate: false });
+    await startedWithApplicant(cookie);
+    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ simulate: false, applicantReady: false });
     expect((await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' })).status).toBe(404);
+    expect(fake.simulated).toEqual([]);
+  });
+
+  it('works on a hosted server once the applicantCreated webhook links the applicant', async () => {
+    makeApp('whsec', true, { KYC_SIMULATE: '1' });
+    const cookie = signedIn();
+    await call('POST', '/api/kyc/start', cookie, { level: 'L1' });
+    // Before the webhook: not linked yet.
+    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ simulate: true, applicantReady: false });
+    const early = await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' });
+    expect(early.status).toBe(409);
+    expect(await early.json()).toEqual({ error: 'not-started' });
+    // applicantCreated arrives.
+    const externalUserId = fake.tokens.at(-1)!.externalUserId;
+    expect((await webhook({ type: 'applicantCreated', externalUserId, applicantId: 'hosted1' }, 'whsec')).status).toBe(200);
+    expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ applicantReady: true });
+    const r = await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ level: 'L1', verifiedHuman: true });
+  });
+
+  it('allows 10 simulated results per account per hour', async () => {
+    let t = Date.now();
+    makeApp(null, true, { KYC_SIMULATE: '1' }, () => t);
+    const cookie = signedIn();
+    db.prepare('UPDATE sessions SET expires_at = ?').run(t + 24 * 60 * 60_000); // outlive the clock jump below
+    await startedWithApplicant(cookie);
+    for (let i = 0; i < 10; i++) {
+      expect((await call('POST', '/api/kyc/simulate', cookie, { result: 'retry-selfie' })).status).toBe(200);
+    }
+    const limited = await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' });
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: 'too-many-simulations' });
+    expect(fake.simulated).toHaveLength(10); // the refused call never reached Sumsub
+    // Another account has its own allowance.
+    const other = signedIn('user-2');
+    db.prepare('UPDATE sessions SET expires_at = ?').run(t + 24 * 60 * 60_000);
+    await call('POST', '/api/kyc/start', other, { level: 'L1' });
+    await call('POST', '/api/kyc/applicant', other, { applicantId: 'app999' });
+    expect((await call('POST', '/api/kyc/simulate', other, { result: 'pass' })).status).toBe(200);
+    // An hour later the first account can go again.
+    t += 60 * 60_000;
+    expect((await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' })).status).toBe(200);
+  });
+
+  it('refused or invalid calls do not use up the allowance', async () => {
+    const cookie = signedIn();
+    for (let i = 0; i < 12; i++) await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' }); // 409: not started
+    await startedWithApplicant(cookie);
+    for (let i = 0; i < 12; i++) await call('POST', '/api/kyc/simulate', cookie, { result: 'nope' }); // 400
+    expect((await call('POST', '/api/kyc/simulate', cookie, { result: 'pass' })).status).toBe(200);
+  });
+});
+
+describe('KYC_SIMULATE setting', () => {
+  const base = { SUMSUB_APP_TOKEN: 'sbx:t', SUMSUB_SECRET_KEY: 's' };
+  it('is off unless set to 1', () => {
+    expect(loadKycConfig(env(base), 'localhost')!.simulate).toBe(false);
+    expect(loadKycConfig(env({ ...base, KYC_SIMULATE: '0' }), 'localhost')!.simulate).toBe(false);
+    expect(loadKycConfig(env({ ...base, KYC_SIMULATE: '1' }), 'localhost')!.simulate).toBe(true);
+    expect(
+      loadKycConfig(env({ ...base, SUMSUB_WEBHOOK_SECRET: 'w', KYC_SIMULATE: '1' }), 'withlogin.com')!.simulate,
+    ).toBe(true);
+  });
+  it('refuses unclear values instead of guessing', () => {
+    expect(() => loadKycConfig(env({ ...base, KYC_SIMULATE: 'true' }), 'localhost')).toThrow(/KYC_SIMULATE/);
+  });
+  it('still only works with a sandbox token', () => {
+    expect(() => loadKycConfig(env({ SUMSUB_APP_TOKEN: 'prd:t', SUMSUB_SECRET_KEY: 's', KYC_SIMULATE: '1' }), 'localhost')).toThrow(/sandbox/);
   });
 });
 
@@ -437,7 +516,7 @@ describe('enabled levels (SUMSUB_LEVELS)', () => {
   it('does not start a level that is not set up at Sumsub', async () => {
     db = openDb(':memory:');
     fake = new FakeSumsub();
-    const kycConfig = loadKycConfig(env({ SUMSUB_APP_TOKEN: 'sbx:t', SUMSUB_SECRET_KEY: 's', SUMSUB_LEVELS: 'L1' }), 'localhost')!;
+    const kycConfig = loadKycConfig(env({ SUMSUB_APP_TOKEN: 'sbx:t', SUMSUB_SECRET_KEY: 's', SUMSUB_LEVELS: 'L1', KYC_SIMULATE: '1' }), 'localhost')!;
     app = createApp({ config: loadConfig(env({ DEV_OUTBOX: '1' })), db, mailer: devOutboxMailer([]), kyc: { config: kycConfig, sumsub: fake } }).app;
     const cookie = signedIn();
     expect(await (await call('GET', '/api/kyc', cookie)).json()).toMatchObject({ levels: ['L1'] });

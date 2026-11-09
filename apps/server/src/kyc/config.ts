@@ -27,6 +27,14 @@ export interface KycConfig {
    * "L1,L2"). Default: all. Levels build in order, so this is always a prefix.
    */
   enabledLevels: Level[];
+  /**
+   * SIMULATED REVIEW RESULTS (KYC_SIMULATE=1). Lets a signed-in user skip the
+   * camera check and ask Sumsub's sandbox to record a result instead. Off
+   * unless set explicitly. Sandbox-only by construction: the token check
+   * above refuses anything but a sandbox token, and Sumsub only accepts
+   * simulated results in the sandbox.
+   */
+  simulate: boolean;
 }
 
 /** Returns null when KYC isn't configured, so the rest of Login still runs without it. */
@@ -50,8 +58,13 @@ export function loadKycConfig(env: NodeJS.ProcessEnv, rpId: string): KycConfig |
   if (!enabledLevels.every((l, i) => l === LEVELS[i])) {
     throw new Error('SUMSUB_LEVELS must list levels in order from L1, for example "L1" or "L1,L2".');
   }
+  const simulate = env.KYC_SIMULATE?.trim() ?? '';
+  if (simulate !== '' && simulate !== '0' && simulate !== '1') {
+    throw new Error('KYC_SIMULATE must be 1 (on) or 0 / unset (off).');
+  }
   return {
     enabledLevels: enabledLevels as Level[],
+    simulate: simulate === '1',
     appToken,
     secretKey,
     webhookSecret,

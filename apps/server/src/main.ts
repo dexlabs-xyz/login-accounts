@@ -56,7 +56,8 @@ serve({ fetch: app.fetch, port: config.port, hostname }, ({ port }) => {
   console.log(
     !kycConfig
       ? 'KYC off: set SUMSUB_APP_TOKEN and SUMSUB_SECRET_KEY (sandbox) to turn it on.'
-      : `KYC on: Sumsub SANDBOX, ${kycConfig.webhookSecret ? 'webhooks' : 'polling (local development)'}.`,
+      : `KYC on: Sumsub SANDBOX, ${kycConfig.webhookSecret ? 'webhooks' : 'polling (local development)'}` +
+        `${kycConfig.simulate ? ', simulated results ON (KYC_SIMULATE=1)' : ''}.`,
   );
   console.log(
     gasSender

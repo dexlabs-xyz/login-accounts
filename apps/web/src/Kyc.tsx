@@ -38,8 +38,10 @@ type KycView =
       mode: 'webhook' | 'polling';
       level: Level | null;
       verifiedHuman: boolean;
-      /** Local development only: the simulated-review test panel is available. */
+      /** The "skip the face check" panel is on (KYC_SIMULATE=1, sandbox only). */
       simulate: boolean;
+      /** Sumsub has created this account's applicant, so a simulated result can be recorded. */
+      applicantReady: boolean;
       /** The levels set up at Sumsub, in order. */
       levels: Level[];
       attempt: { level: Level; state: AttemptState; reason: Reason | null } | null;
@@ -52,9 +54,10 @@ const LEVEL_INFO: Record<Level, { title: string; what: string; time: string }> =
 };
 
 /**
- * SIMULATED REVIEW RESULTS, local development only. The sandbox liveness check
- * needs a real face, and nobody's real face goes into the sandbox, so this
- * panel asks Sumsub's sandbox to record a result instead.
+ * SIMULATED REVIEW RESULTS (sandbox only, on when the server sets
+ * KYC_SIMULATE=1). The sandbox liveness check needs a real face. This panel
+ * lets people skip it and ask Sumsub's sandbox to record a result instead.
+ * "Pass" comes first. The others are for testing the retry and reject paths.
  */
 const SIMULATED: { result: string; label: string }[] = [
   { result: 'pass', label: 'Pass' },
@@ -98,7 +101,8 @@ function explainKyc(err: unknown): string {
       'verification-closed': 'This verification can’t be retried.',
       'signed-out': 'You’ve been signed out. Sign in again.',
       'level-unavailable': 'This step isn’t available yet.',
-      'not-started': 'Sumsub hasn’t created the test applicant yet. Click Continue in the window above first.',
+      'not-started': 'Sumsub is still setting up your test check. Try again in a moment.',
+      'too-many-simulations': 'You’ve recorded a lot of simulated results this hour. Try again later.',
     };
     return m[err.code] ?? 'Something went wrong. Try again.';
   }
@@ -197,6 +201,20 @@ export function KycCard() {
     };
   }, [stage, widget, load]);
 
+  // Hosted: Sumsub links the applicant through a webhook a moment after the
+  // widget opens. Until it does, check every 2 seconds (for up to 1 minute) so
+  // the "skip the face check" buttons appear as soon as they can work.
+  const waitingForApplicant = stage === 'widget' && view?.available && view.simulate && !view.applicantReady;
+  useEffect(() => {
+    if (!waitingForApplicant) return;
+    let n = 0;
+    const t = setInterval(() => {
+      if (++n > 30) return clearInterval(t);
+      void load();
+    }, 2000);
+    return () => clearInterval(t);
+  }, [waitingForApplicant, load]);
+
   const simulate = async (result: string) => {
     setError('');
     setBusy(true);
@@ -240,7 +258,9 @@ export function KycCard() {
     <section className="card" aria-labelledby="kyc-h">
       <h2 id="kyc-h">Verification</h2>
       <p className="warning small" role="note">
-        <strong>Sandbox (test mode).</strong> No real checks happen here. Don’t use your real face or a real ID document.
+        <strong>Sandbox (test mode):</strong> results aren’t real identity checks. If you do the real check, your camera images and
+        documents go to Sumsub’s test environment, not to Login.
+        {view.simulate && <> Prefer not to? Use “Skip the face check” below.</>}
       </p>
 
       {view.level ? (
@@ -279,18 +299,21 @@ export function KycCard() {
         <div>
           <div ref={container} id="sumsub-websdk-container" />
           {view.simulate && (
-            <div className="warning small" role="group" aria-label="Simulated result">
+            <div className="warning small" role="group" aria-labelledby="kyc-skip-h">
               <p>
-                <strong>Test panel (local development only).</strong> Sumsub’s sandbox can’t check a face without a real one.
-                Open the step above until it asks for the camera, then pick the result Sumsub should record.
+                <strong id="kyc-skip-h">Skip the face check: record a simulated result (sandbox only)</strong>
               </p>
-              <div className="row">
-                {SIMULATED.map((m) => (
-                  <button key={m.result} disabled={busy} onClick={() => void simulate(m.result)}>
-                    {m.label}
-                  </button>
-                ))}
-              </div>
+              {view.applicantReady ? (
+                <div className="row">
+                  {SIMULATED.map((m) => (
+                    <button key={m.result} disabled={busy} onClick={() => void simulate(m.result)}>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p role="status">Starting… one moment</p>
+              )}
             </div>
           )}
           <button className="link" onClick={() => void closeWidget()}>
