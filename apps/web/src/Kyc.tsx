@@ -265,8 +265,8 @@ export function KycCard() {
 
       {view.level ? (
         <p>
-          <strong>{LEVEL_INFO[view.level].title}</strong> ({view.level}). Apps you sign in to see “verified human”. They see your
-          level only if you allow it for that app.
+          <strong>{LEVEL_INFO[view.level].title}</strong> ({view.level}). Apps you sign in to with Login see only that you’re a
+          verified human, never which steps you did.
         </p>
       ) : (
         <p className="muted">
