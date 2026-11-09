@@ -6,13 +6,17 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { privateWallet } from '../railgun/client.ts';
 import { SEPOLIA_USDT, USDT_DECIMALS } from '../railgun/protocol.ts';
-import { formatUnits, loadTokens, toUnits } from '../deposits/tidepool.ts';
+import { CHAIN_NAMES, formatUnits, loadTokens, toUnits, TidepoolError, type OriginChain, type Quote as SwapQuote, type Token } from '../deposits/tidepool.ts';
+import { depositProgress, prepareSwapWithdrawal, saveWithdrawal, trackWithdrawal } from '../deposits/flow.ts';
+import type { DepositRecord, WithdrawalSwap } from '../railgun/protocol.ts';
 
 type Kind = 'transfer' | 'unshield';
 
 const ZK_ADDRESS = /^0zk1[02-9ac-hj-np-z]{100,140}$/;
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const ZERO_ADDRESS = /^0x0{40}$/;
+const SOL_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const chainName = (chain: string) => CHAIN_NAMES[chain as OriginChain] ?? chain;
 const sepoliaTx = (hash: string) => `https://sepolia.etherscan.io/tx/${hash}`;
 
 const ERRORS: Record<string, string> = {
@@ -27,8 +31,13 @@ const ERRORS: Record<string, string> = {
   'broadcaster-refused':
     'The network relay couldn’t confirm the privacy check on your funds, so nothing was sent. Press Review again to use a different relay.',
   'Wallet locked.': 'Your wallet locked. Unlock and try again.',
+  'swap-mismatch': 'The swap quote didn’t match the withdrawal, so we stopped. Review it again.',
 };
 const explain = (e: unknown, kind: Kind) =>
+  (e instanceof TidepoolError &&
+    (/capped/i.test(e.message)
+      ? 'Tidepool’s testnet sends at most 0.006 ETH per withdrawal (about 12 USDT). Withdraw less, or choose USDC.'
+      : 'Tidepool couldn’t price this swap right now. Try again, or withdraw as USDT.')) ||
   (e instanceof Error && ERRORS[e.message]) ||
   (kind === 'transfer' ? 'The send didn’t go through. Nothing was sent.' : 'The withdrawal didn’t go through. Nothing was sent.');
 
@@ -43,8 +52,32 @@ function feeInUsdt(wei: string, ethPrice: number | null): string {
 }
 let ethPricePromise: Promise<number | null> | null = null;
 const ethPrice = () => (ethPricePromise ??= loadTokens().then((t) => t.ethPrice, () => ((ethPricePromise = null), null)));
+let swapTokensPromise: Promise<Token[]> | null = null;
+const swapTokens = () => (swapTokensPromise ??= loadTokens().then((t) => t.withdraw, () => ((swapTokensPromise = null), [])));
 const usdt = (units: string) => formatUnits(units, USDT_DECIMALS, 6);
 const short = (a: string) => `${a.slice(0, 14)}…${a.slice(-8)}`;
+const out = (units: string, t: Token) => formatUnits(units, t.decimals, t.decimals > 6 ? 6 : 2);
+
+/** Live status of a swapped withdrawal, from the deposit flow's progress store. */
+function swapStatus(amount: string, s: Swap, stage: ReturnType<typeof depositProgress.get>): string {
+  const what = `${s.token.symbol} on ${chainName(s.token.blockchain)}`;
+  switch (stage?.kind) {
+    case 'withdraw-arrived':
+      return `Done: about ${out(s.quote.amountOut, s.token)} ${what} was sent to your address.`;
+    case 'withdraw-refunding':
+    case 'waiting-evm':
+    case 'arriving':
+    case 'adding-gas':
+    case 'shielding':
+      return 'The swap didn’t go through, so your USDT is coming back to your private balance. You can follow it under Add money.';
+    case 'done':
+      return 'The swap didn’t go through. Your USDT is back in your private balance (spendable after Railgun’s privacy check).';
+    case 'withdraw-not-sent':
+      return 'The withdrawal wasn’t sent. Nothing left your private balance.';
+    default:
+      return `Withdrew ${usdt(amount)} USDT. Swapping it into ${what}… This usually takes a minute or two.`;
+  }
+}
 
 const COPY = {
   transfer: {
@@ -58,7 +91,8 @@ const COPY = {
   },
   unshield: {
     title: 'Withdraw',
-    intro: 'Out of your private balance to a public Sepolia address, as USDT.',
+    intro:
+      'Out of your private balance to a public address: as USDT on Ethereum Sepolia, or swapped through NEAR Intents into another token or chain.',
     toLabel: 'To (public 0x address on Ethereum Sepolia)',
     placeholder: '0x…',
     sent: (amount: string) => `Withdrew ${usdt(amount)} USDT. It arrives at the address once the transaction confirms.`,
@@ -78,12 +112,21 @@ interface Quote {
   expiresAt: number;
 }
 
+/** A withdrawal swapped through Tidepool: where it arrives, and the refund record. */
+interface Swap {
+  token: Token;
+  to: string;
+  refund: DepositRecord;
+  quote: SwapQuote;
+  sentUsdt: string;
+}
+
 type Step =
   | { kind: 'form' }
   | { kind: 'quoting' }
-  | ({ kind: 'review'; amount: string } & Quote)
+  | ({ kind: 'review'; amount: string; swap?: Swap } & Quote)
   | { kind: 'sending' }
-  | { kind: 'sent'; txHash: string; amount: string };
+  | { kind: 'sent'; txHash: string; amount: string; swap?: Swap };
 
 type PanelProps = { confirmWithPasskey: () => Promise<boolean> };
 
@@ -100,6 +143,13 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
   const [step, setStep] = useState<Step>({ kind: 'form' });
+  /** Withdrawals: '' = USDT on Ethereum Sepolia, else the Tidepool asset to swap into. */
+  const [dest, setDest] = useState('');
+  const [destTokens, setDestTokens] = useState<Token[]>([]);
+  useEffect(() => {
+    if (kind === 'unshield') void swapTokens().then(setDestTokens);
+  }, [kind]);
+  useSyncExternalStore(depositProgress.subscribe, depositProgress.version);
   const [error, setError] = useState('');
   /** Development builds only: the worker's real error, so testers can copy it without dev tools. */
   const [devDetail, setDevDetail] = useState('');
@@ -122,8 +172,14 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
     pw.balances.Spendable?.find((b) => b.tokenAddress.toLowerCase() === SEPOLIA_USDT.toLowerCase())?.amount ?? '0';
   const units = toUnits(amount, USDT_DECIMALS);
   const target = to.trim();
+  const destToken = kind === 'unshield' ? destTokens.find((t) => t.assetId === dest) : undefined;
+  const toSolana = destToken?.blockchain === 'sol';
   const addressProblem =
-    kind === 'transfer'
+    toSolana
+      ? SOL_ADDRESS.test(target)
+        ? ''
+        : 'That isn’t a valid Solana address.'
+      : kind === 'transfer'
       ? !ZK_ADDRESS.test(target)
         ? 'That isn’t a private 0zk address.'
         : target === pw.railgunAddress
@@ -142,8 +198,30 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
     setDevDetail('');
     setStep({ kind: 'quoting' });
     try {
-      const q = await privateWallet.call<Quote>('send.quote', { kind, to: target, amount: units });
-      setStep({ kind: 'review', amount: units, ...q });
+      if (!destToken) {
+        const q = await privateWallet.call<Quote>('send.quote', { kind, to: target, amount: units });
+        setStep({ kind: 'review', amount: units, ...q });
+        return;
+      }
+      // Swapped withdrawal: price the swap for what reaches Tidepool after Railgun's fee,
+      // then withdraw exactly that much to Tidepool's one-time swap address.
+      const fees = await privateWallet.call<{ unshieldFeeBasisPoints: string | number | null }>('fees');
+      if (fees.unshieldFeeBasisPoints === null) throw new Error('no-broadcaster');
+      const p = await prepareSwapWithdrawal({
+        destination: destToken,
+        to: target,
+        amount: units,
+        unshieldFeeBasisPoints: BigInt(fees.unshieldFeeBasisPoints),
+      });
+      const q = await privateWallet.call<Quote>('send.quote', { kind, to: p.quote.depositAddress, amount: units, finalTo: target });
+      if (q.receives !== p.sentUsdt) throw new Error('swap-mismatch');
+      setStep({
+        kind: 'review',
+        amount: units,
+        ...q,
+        expiresAt: Math.min(q.expiresAt, Date.parse(p.quote.deadline)),
+        swap: { token: destToken, to: target, refund: p.refund, quote: p.quote, sentUsdt: p.sentUsdt },
+      });
     } catch (e) {
       fail(e, 'review');
       setStep({ kind: 'form' });
@@ -157,14 +235,42 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
     if (!(await confirmWithPasskey())) return;
     shownProgress.current = 0;
     setStep({ kind: 'sending' });
+    const w: WithdrawalSwap | null = s.swap
+      ? {
+          tidepoolDepositAddress: s.swap.quote.depositAddress,
+          chain: s.swap.token.blockchain,
+          symbol: s.swap.token.symbol,
+          decimals: s.swap.token.decimals,
+          to: s.swap.to,
+          amountUsdt: s.amount,
+          sentUsdt: s.swap.sentUsdt,
+          expectedOut: s.swap.quote.amountOut,
+          minOut: s.swap.quote.minAmountOut,
+          deadline: s.swap.quote.deadline,
+          status: 'sending',
+        }
+      : null;
     try {
+      // Saved first, so a reload mid-send still follows the swap (and any refund).
+      if (w && s.swap) await saveWithdrawal(s.swap.refund.index, w);
       const { txHash } = await privateWallet.call<{ txHash: string }>('send.execute', { quoteId: s.quoteId });
-      setStep({ kind: 'sent', txHash, amount: s.amount });
+      if (w && s.swap) {
+        const sent: WithdrawalSwap = { ...w, txHash, status: 'sent' };
+        await saveWithdrawal(s.swap.refund.index, sent).catch(() => {});
+        void trackWithdrawal({ ...s.swap.refund, withdrawal: sent });
+      }
+      setStep({ kind: 'sent', txHash, amount: s.amount, swap: s.swap });
       setTo('');
       setAmount('');
     } catch (e) {
       fail(e, 'send');
       setStep({ kind: 'form' });
+      if (w && s.swap) {
+        // Refused before sending: nothing left. Anything else: keep watching in case it went out.
+        const known = e instanceof Error && Object.hasOwn(ERRORS, e.message);
+        if (known) void saveWithdrawal(s.swap.refund.index, { ...w, status: 'failed' }).catch(() => {});
+        else void trackWithdrawal({ ...s.swap.refund, withdrawal: w });
+      }
     } finally {
       privateWallet.clearSendProgress();
     }
@@ -181,9 +287,24 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
 
       {(step.kind === 'form' || step.kind === 'quoting') && (
         <form className="stack" onSubmit={(e) => (e.preventDefault(), void review())}>
+          {kind === 'unshield' && destTokens.length > 0 && (
+            <label>
+              Receive as
+              <select value={dest} onChange={(e) => setDest(e.target.value)} data-testid="withdraw-receive-as">
+                <option value="">USDT on Ethereum Sepolia</option>
+                {destTokens.map((t) => (
+                  <option key={t.assetId} value={t.assetId}>
+                    {t.symbol} on {chainName(t.blockchain)} (swapped through NEAR Intents)
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
-            {copy.toLabel}
-            <input value={to} onChange={(e) => setTo(e.target.value)} placeholder={copy.placeholder} required />
+            {destToken
+              ? `To (your ${toSolana ? 'Solana' : '0x'} address on ${chainName(destToken.blockchain)})`
+              : copy.toLabel}
+            <input value={to} onChange={(e) => setTo(e.target.value)} placeholder={toSolana ? 'Solana address' : copy.placeholder} required />
             {target && addressProblem && <span className="error small">{addressProblem}</span>}
           </label>
           <label>
@@ -202,6 +323,33 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
             <p>
               Send <strong>{usdt(step.amount)} USDT</strong> to <code className="address">{short(step.to)}</code>
             </p>
+          ) : step.swap ? (
+            <>
+              <p>
+                Withdraw <strong>{usdt(step.amount)} USDT</strong>, arriving as{' '}
+                <strong data-testid="withdraw-swap-receives">
+                  about {out(step.swap.quote.amountOut, step.swap.token)} {step.swap.token.symbol}
+                </strong>{' '}
+                on {chainName(step.swap.token.blockchain)} at <code className="address">{step.swap.to}</code>
+              </p>
+              <p className="small">
+                Railgun’s withdrawal fee: <strong>{usdt(step.railgunFee)} USDT</strong>. The other {usdt(step.receives)} USDT is
+                swapped through NEAR Intents (Tidepool’s testnet). If the rate moves, you get at least{' '}
+                {out(step.swap.quote.minAmountOut, step.swap.token)} {step.swap.token.symbol}, or the swap is cancelled and the
+                USDT comes back to your private balance. Tidepool sees the address you’re withdrawing to.
+              </p>
+              <p className="warning small" role="note">
+                <strong>This part is public.</strong> Anyone can see this amount arriving at this address, but not that it
+                came from you. To keep it that way, use an address that isn’t linked to you, and don’t withdraw the exact
+                amount you just deposited.
+              </p>
+              {step.fundedDeposits && (
+                <p className="error small" role="alert" data-testid="withdraw-linked-warning">
+                  <strong>This address sent money into your Login account.</strong> Anyone can see both on-chain, so this
+                  withdrawal can be tied to you. To keep it private, withdraw to a fresh address instead.
+                </p>
+              )}
+            </>
           ) : (
             <>
               <p>
@@ -250,7 +398,7 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
       {step.kind === 'sent' && (
         <div className="stack">
           <p role="status" className="info" data-testid={`${kind}-status`}>
-            {copy.sent(step.amount)}
+            {step.swap ? swapStatus(step.amount, step.swap, depositProgress.get(step.swap.refund.index)) : copy.sent(step.amount)}
           </p>
           <a className="small" href={sepoliaTx(step.txHash)} target="_blank" rel="noreferrer">
             {copy.link}

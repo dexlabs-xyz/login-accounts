@@ -265,12 +265,13 @@ export function createDeposits(ctx: DepositContext) {
 
     /** Page-side progress (quote taken, delivered, refunded...). Only these fields can change here. */
     async update(params: unknown) {
-      const { index, status, quote, userEthWei, swaps } = params as {
+      const { index, status, quote, userEthWei, swaps, withdrawal } = params as {
         index: number;
         status?: DepositStatus;
         quote?: DepositRecord['quote'];
         userEthWei?: string;
         swaps?: DepositSwap[];
+        withdrawal?: DepositRecord['withdrawal'];
       };
       const allowed: DepositStatus[] = ['awaiting-delivery', 'delivered', 'refunded', 'failed'];
       if (status && !allowed.includes(status)) throw new Error('Status not allowed from the page.');
@@ -280,6 +281,7 @@ export function createDeposits(ctx: DepositContext) {
         ...(quote ? { quote } : {}),
         ...(userEthWei !== undefined ? { userEthWei } : {}),
         ...(swaps ? { swaps } : {}),
+        ...(withdrawal ? { withdrawal } : {}),
       });
     },
 

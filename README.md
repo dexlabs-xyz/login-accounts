@@ -21,9 +21,12 @@ chains, built on **NEAR Intents** and **Railgun**.
    swap pays on **mainnet NEAR Intents** right now (a read-only price check).
 4. **Send privately** to another Login account (a `0zk…` address). Nobody
    on-chain can see the amount, the sender or the recipient.
-5. **Withdraw** to any Ethereum address. The review shows every fee, warns
-   you that this part is public, and flags it if the address is one that sent
-   money into your account (anyone could link the two).
+5. **Withdraw** to any Ethereum address as USDT, or **as another token or
+   chain** through NEAR Intents: ETH or USDC on Ethereum Sepolia, USDC on
+   Solana devnet or Base Sepolia, ETH on Arbitrum Sepolia. The review shows
+   every fee, warns you that this part is public, and flags it if the address
+   is one that sent money into your account (anyone could link the two). If a
+   swap can't be done, the USDT comes back to your private balance.
 6. **Verify you're human** (optional, Sumsub sandbox), and **continue with
    Login** on other apps: they learn only that you're a verified human, with a
    different ID per app.
@@ -74,7 +77,6 @@ checked"), usually one to two hours, before they can be spent.
   paying their own gas in USDT, replacing the testnet gas faucet. Planned
   (notes in the design doc), not built.
 - **Split-key recovery** for losing every passkey.
-- **Withdrawals to Solana** (today: Ethereum addresses only).
 - **A developer dashboard for "Continue with Login"**: today each app that
   can use Login is added by hand to the server's settings. Next, developers
   register their own apps (name, exact callback, proven domain) and get a

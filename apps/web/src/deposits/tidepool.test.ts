@@ -1,7 +1,7 @@
 /** Tidepool is untrusted: these checks are what stop a bad response from redirecting a deposit. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SEPOLIA_USDC, SEPOLIA_USDT } from '../railgun/protocol.ts';
-import { formatUnits, getQuote, getStatus, isValidAddress, loadTokens, toUnits, type Token } from './tidepool.ts';
+import { formatUnits, getQuote, getStatus, isValidAddress, loadTokens, toUnits, withdrawTokens, type Token } from './tidepool.ts';
 
 const usdt: Token = { assetId: 'nep141:eth-usdt', blockchain: 'eth', symbol: 'USDT', decimals: 6, contractAddress: SEPOLIA_USDT };
 const usdc: Token = { assetId: 'nep141:base-usdc', blockchain: 'base', symbol: 'USDC', decimals: 6, contractAddress: '0x38d81431B9f76d9699AF7517040D5221D9dEA252' };
@@ -109,5 +109,34 @@ describe('amounts and addresses', () => {
     expect(isValidAddress('base', ME)).toBe(true);
     expect(isValidAddress('sol', ME)).toBe(false);
     expect(isValidAddress('sol', '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin')).toBe(true);
+  });
+});
+
+describe('withdrawals through a swap', () => {
+  const sepUsdc: Token = { assetId: 'nep141:eth-usdc', blockchain: 'eth', symbol: 'USDC', decimals: 6, contractAddress: SEPOLIA_USDC };
+  const sepEth: Token = { assetId: 'nep141:eth', blockchain: 'eth', symbol: 'ETH', decimals: 18 };
+  const arbEth: Token = { assetId: 'nep141:arb', blockchain: 'arb', symbol: 'ETH', decimals: 18 };
+  const solUsdc: Token = { assetId: 'nep141:sol-usdc', blockchain: 'sol', symbol: 'USDC', decimals: 6 };
+  const sol: Token = { assetId: 'nep141:sol', blockchain: 'sol', symbol: 'SOL', decimals: 9 };
+
+  it('offers exactly the agreed list, in order, and never SOL', () => {
+    const list = withdrawTokens([sol, usdc, arbEth, solUsdc, sepUsdc, sepEth, usdt]);
+    expect(list.map((t) => `${t.symbol}@${t.blockchain}`)).toEqual(['ETH@eth', 'USDC@eth', 'USDC@sol', 'USDC@base', 'ETH@arb']);
+  });
+  it('drops a Sepolia USDC that isn’t our verified contract, and an "ETH" with a contract', () => {
+    const bad = withdrawTokens([{ ...sepUsdc, contractAddress: '0x9999999999999999999999999999999999999999' }, { ...sepEth, contractAddress: '0x99' }]);
+    expect(bad).toEqual([]);
+  });
+  it('a quote must be for the token we asked for', async () => {
+    const SOL_ME = '7pafEGXSmR35rLKNaD6inpfLYuEnRX9DyBc1c7M8r4Xr';
+    const q = (echo: Record<string, unknown>) => ({
+      quote: { depositAddress: DEPOSIT, amountIn: '9975000', amountOut: '9940000', minAmountOut: '9840000', deadline: '2026-11-09T12:00:00Z' },
+      quoteRequest: { recipient: SOL_ME, destinationAsset: solUsdc.assetId, refundTo: ME, ...echo },
+    });
+    const askSwap = () => getQuote({ origin: usdt, usdt, destination: solUsdc, amount: '9975000', recipient: SOL_ME, refundTo: ME });
+    mockFetch(q({}));
+    expect((await askSwap()).depositAddress).toBe(DEPOSIT);
+    mockFetch(q({ destinationAsset: usdt.assetId }));
+    await expect(askSwap()).rejects.toThrow('doesn’t match');
   });
 });

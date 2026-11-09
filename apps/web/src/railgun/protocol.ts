@@ -58,6 +58,32 @@ export interface DepositSwap {
   status: 'quoted' | 'sent' | 'success' | 'refunded' | 'failed';
 }
 
+/**
+ * A withdrawal that arrives as another token or on another chain: the private
+ * USDT is withdrawn straight to Tidepool's one-time swap address, and Tidepool
+ * delivers the chosen token to the user's address. If the swap fails, Tidepool
+ * refunds the USDT to this record's fresh deposit address, which then moves it
+ * back into the private balance like any deposit.
+ */
+export interface WithdrawalSwap {
+  tidepoolDepositAddress: string;
+  /** Destination chain and token (Tidepool's names, e.g. 'sol', 'USDC'). */
+  chain: string;
+  symbol: string;
+  decimals: number;
+  /** The user's address on the destination chain. */
+  to: string;
+  /** USDT leaving the private balance, and arriving at Tidepool after Railgun's fee (smallest units). */
+  amountUsdt: string;
+  sentUsdt: string;
+  /** What Tidepool quoted, in the destination token's smallest units. */
+  expectedOut: string;
+  minOut: string;
+  deadline: string;
+  txHash?: string;
+  status: 'sending' | 'sent' | 'success' | 'refunded' | 'failed';
+}
+
 export interface DepositRecord {
   index: number;
   /** The fresh Sepolia address (m/44'/60'/0'/0/index) that receives the USDT. */
@@ -82,6 +108,8 @@ export interface DepositRecord {
   funders?: string[];
   /** Last block already searched for token transfers in (so a rescan doesn't repeat work). */
   fundersCheckedBlock?: number;
+  /** Set when this fresh address is the refund address of a swapped withdrawal. */
+  withdrawal?: WithdrawalSwap;
   createdAt: number;
   updatedAt: number;
 }

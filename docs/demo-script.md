@@ -42,11 +42,16 @@ a day ahead:
   private transaction happened: no amount, no sender, no recipient.*
 - On Bob's screen: 25 USDT arriving.
 
-## 5. Withdraw (30 s), as Alice
+## 5. Withdraw (60 s), as Alice
 
 - **Withdraw** → a fresh Rabby address → 10 USDT → Review: Railgun's 0.25%
   fee, the exact amount arriving, and the "This part is public" warning →
   passkey → arrives in Rabby.
+- Then, through NEAR Intents: **Receive as → USDC on Base Sepolia** (or
+  Solana devnet) → 5 USDT → Review shows about how much USDC arrives →
+  passkey → "Done". Say: *withdraw as any token, on any chain; if the swap
+  fails, the money comes back to your private balance.* (ETH is capped at
+  0.006 ETH per swap on Tidepool, about 12 USDT.)
 
 ## 6. Continue with Login (30 s)
 

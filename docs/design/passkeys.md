@@ -170,6 +170,29 @@ easy to get wrong (USDC sent to a USDT address sat unnoticed overnight).
     days), so deposits made before this change, or rebuilt on a new device,
     aren't covered; ETH that arrives while the app is closed isn't either. The
     general "use an address that isn't linked to you" advice stays.
+  - **Withdraw as another token or chain (decided 2026-11-09, team lead).**
+    "Receive as" offers ETH or USDC on Ethereum Sepolia, USDC on Solana
+    devnet or Base Sepolia, and ETH on Arbitrum Sepolia.
+    SOL is left out (Tidepool caps it at 0.005 SOL per swap); Tidepool also
+    caps ETH at 0.006 ETH per swap (about 12 USDT), and the app says so.
+    How it works, all in the browser:
+    1. Reserve a fresh deposit address as the **refund address**.
+    2. Ask Tidepool for an EXACT_INPUT quote: Sepolia USDT in (the amount
+       after Railgun's 0.25% unshield fee, rounded down as the contract does),
+       the chosen token out, to the user's address; refunds to step 1.
+    3. Price the unshield to Tidepool's one-time swap address; check that what
+       arrives there equals the quoted input exactly (else stop).
+    4. Review: Railgun's fee, about/at least what arrives, the network fee,
+       the public-part warning, and the linked-address warning (checked
+       against the user's address, since the same EVM address on any chain is
+       the same owner). Passkey, proof, broadcaster, as for any withdrawal.
+    5. Follow Tidepool's status. On a refund (or failure), the refund address
+       is treated as an EVM deposit: the existing deposit flow gets it testnet
+       gas and shields the USDT back into the private balance.
+    The withdrawal is saved (encrypted, on this device) before it's sent, so
+    a reload keeps following it. Tidepool sees the destination address, as it
+    does for any swap; on-chain, the unshield goes to Tidepool's address, not
+    the user's.
 
 ### Smart accounts
 

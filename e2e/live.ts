@@ -15,7 +15,8 @@ export async function watch(page: Page, testId: string, until: RegExp, timeout: 
   let last = '';
   await expect
     .poll(async () => {
-      const t = (await page.getByTestId(testId).textContent().catch(() => '')) ?? '';
+      // Short timeout: once the status is gone (e.g. back to the form on an error), don't hang.
+      const t = (await page.getByTestId(testId).textContent({ timeout: 1_000 }).catch(() => '')) ?? '';
       if (t && t !== last) say(`${testId}: ${(last = t)}`);
       return t;
     }, { timeout, intervals: [3_000] })

@@ -58,7 +58,9 @@ function stageText(stage: Stage | undefined, record: DepositRecord): string {
   }
   switch (stage?.kind) {
     case 'waiting-evm':
-      return 'Waiting for USDT, USDC or ETH to arrive at your deposit address…';
+      return record.withdrawal
+        ? 'Waiting for Tidepool’s refund to arrive…'
+        : 'Waiting for USDT, USDC or ETH to arrive at your deposit address…';
     case 'swapping':
       return {
         PENDING_DEPOSIT: `Swapping your ${stage.token} into USDT…`,
@@ -340,7 +342,9 @@ export function AddMoney() {
                 <li key={d.index}>
                   <div>
                     <strong>
-                      {d.quote?.anyToken
+                      {d.withdrawal
+                        ? `Refund of a withdrawal (${d.withdrawal.symbol} on ${CHAIN_NAMES[d.withdrawal.chain as OriginChain] ?? d.withdrawal.chain})`
+                        : d.quote?.anyToken
                         ? `Deposit on Ethereum Sepolia`
                         : d.quote
                           ? `${d.quote.amountInFormatted || d.quote.amountIn} ${d.quote.originSymbol} from ${CHAIN_NAMES[d.quote.originChain as OriginChain]}`

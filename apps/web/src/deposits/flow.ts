@@ -9,7 +9,7 @@
  */
 import { api } from '../api.ts';
 import { privateWallet } from '../railgun/client.ts';
-import { SEPOLIA_WETH, type DepositRecord, type DepositSwap } from '../railgun/protocol.ts';
+import { SEPOLIA_WETH, type DepositRecord, type DepositSwap, type WithdrawalSwap } from '../railgun/protocol.ts';
 import { ethSwapChunks, ethToSwap, MIN_ETH_SWAP_WEI } from './plan.ts';
 import { formatUnits, getQuote, getStatus, isFinal, loadTokens, type Quote, type SwapStatus, type Token } from './tidepool.ts';
 
@@ -37,7 +37,13 @@ export type Stage =
   | { kind: 'failed'; reason: string }
   | { kind: 'needs-finish' }
   /** Money reached a deposit address after its deposit finished (e.g. paid in two parts). */
-  | { kind: 'late-funds' };
+  | { kind: 'late-funds' }
+  /** Swapped withdrawal: Tidepool is swapping the withdrawn USDT. */
+  | { kind: 'withdraw-swapping'; swap: SwapStatus }
+  | { kind: 'withdraw-arrived' }
+  /** Swapped withdrawal didn't go through: the USDT comes back to the private balance. */
+  | { kind: 'withdraw-refunding' }
+  | { kind: 'withdraw-not-sent' };
 
 const stages = new Map<number, Stage>();
 /** USDC seen at a deposit address (sent instead of USDT), by deposit index. */
@@ -413,9 +419,91 @@ async function checkLate(r: DepositRecord) {
   }
 }
 
+// ---------- withdrawals that arrive as another token or chain ----------
+
+/**
+ * Step 1 (review): reserve a fresh deposit address for refunds, and get
+ * Tidepool's quote for the USDT that will reach it after Railgun's fee.
+ */
+export async function prepareSwapWithdrawal(p: { destination: Token; to: string; amount: string; unshieldFeeBasisPoints: bigint }) {
+  const amount = BigInt(p.amount);
+  // Railgun keeps its fee out of the withdrawn amount (rounded down), as in send.ts.
+  const sentUsdt = (amount - (amount * p.unshieldFeeBasisPoints) / 10_000n).toString();
+  const { usdt } = await tokens();
+  const refund = await privateWallet.call<DepositRecord>('deposit.next');
+  const quote = await getQuote({ origin: usdt, usdt, destination: p.destination, amount: sentUsdt, recipient: p.to, refundTo: refund.address });
+  return { refund, quote, sentUsdt };
+}
+
+/** Save the withdrawal before it's sent, so a reload still follows it. */
+export async function saveWithdrawal(index: number, withdrawal: WithdrawalSwap) {
+  await privateWallet.call('deposit.update', { index, withdrawal });
+}
+
+/**
+ * Follow a swapped withdrawal to the end. If Tidepool refunds it, the USDT
+ * lands at this record's fresh address, and the usual deposit flow moves it
+ * back into the private balance.
+ */
+export async function trackWithdrawal(record: DepositRecord): Promise<void> {
+  const w0 = record.withdrawal;
+  if (!w0 || running.has(record.index)) return;
+  running.add(record.index);
+  let refund: DepositRecord | null = null;
+  try {
+    const w: WithdrawalSwap = { ...w0 };
+    let swap: SwapStatus = 'PENDING_DEPOSIT';
+    for (;;) {
+      swap = await getStatus(w.tidepoolDepositAddress).catch(() => swap);
+      setStage(record.index, { kind: 'withdraw-swapping', swap });
+      if (isFinal(swap)) break;
+      // Interrupted while sending, and nothing ever arrived: it wasn't sent.
+      if (w.status === 'sending' && swap === 'PENDING_DEPOSIT' && Date.now() > Date.parse(w.deadline) + QUOTE_GRACE_MS) {
+        await saveWithdrawal(record.index, { ...w, status: 'failed' });
+        setStage(record.index, { kind: 'withdraw-not-sent' });
+        return;
+      }
+      await sleep(POLL_MS);
+    }
+    if (swap === 'SUCCESS') {
+      await saveWithdrawal(record.index, { ...w, status: 'success' });
+      setStage(record.index, { kind: 'withdraw-arrived' });
+      return;
+    }
+    // Refunded (or failed, which Tidepool also refunds): watch the refund address like an EVM deposit.
+    setStage(record.index, { kind: 'withdraw-refunding' });
+    await saveWithdrawal(record.index, { ...w, status: swap === 'REFUNDED' ? 'refunded' : 'failed' });
+    refund = await privateWallet.call<DepositRecord>('deposit.update', {
+      index: record.index,
+      status: 'awaiting-delivery',
+      quote: {
+        tidepoolDepositAddress: record.address,
+        originChain: 'eth',
+        originSymbol: 'USDT',
+        amountIn: '0',
+        amountInFormatted: '',
+        expectedUsdt: w.sentUsdt,
+        minUsdt: '0',
+        deadline: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+        refundTo: record.address,
+        anyToken: true,
+      },
+    });
+  } catch {
+    // Tidepool or the wallet hiccuped: the next unlock picks it up again.
+  } finally {
+    running.delete(record.index);
+  }
+  if (refund) void track(refund);
+}
+
 /** On unlock: resume deposits still in flight; mark ones that need a tap to finish. */
 export function resumeAll(records: DepositRecord[]) {
   for (const r of records) {
+    if (r.status === 'new' && (r.withdrawal?.status === 'sending' || r.withdrawal?.status === 'sent')) {
+      void trackWithdrawal(r);
+      continue;
+    }
     // Finished deposits, and EVM deposits that timed out, may still receive money later.
     if (r.status === 'shielded' || (r.status === 'failed' && r.quote?.anyToken)) void checkLate(r);
     if (r.status === 'awaiting-delivery') void track(r);
