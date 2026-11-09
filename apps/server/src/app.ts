@@ -58,7 +58,7 @@ export function createApp(deps: AppDeps) {
   app.route('/', passkeyRoutes({ ...deps, sessions, now }));
   app.route(
     '/',
-    kycRoutes({ db: deps.db, kyc: deps.kyc ?? null, session: sessions.require, now, localDev: deps.config.rpId === 'localhost' }),
+    kycRoutes({ db: deps.db, kyc: deps.kyc ?? null, session: sessions.require, now }),
   );
   app.route('/', testnetGasRoutes({ sessions, sender: deps.gasSender ?? null, now }));
   app.route('/', testFundsRoutes({ db: deps.db, sessions, sender: deps.testFunds ?? null, now }));
