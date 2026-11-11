@@ -6,7 +6,10 @@
 export interface OutboxEmail {
   to: string;
   subject: string;
+  /** Plain text. Always sent; it's what text-only email apps show. */
   body: string;
+  /** Optional designed version. Email apps that can show HTML show this instead of `body`. */
+  html?: string;
   sentAt: number;
 }
 
@@ -27,7 +30,13 @@ export function resendMailer(opts: { apiKey: string; from: string; fetch?: typeo
       const res = await doFetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { authorization: `Bearer ${opts.apiKey}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ from: opts.from, to: [email.to], subject: email.subject, text: email.body }),
+        body: JSON.stringify({
+          from: opts.from,
+          to: [email.to],
+          subject: email.subject,
+          text: email.body,
+          ...(email.html ? { html: email.html } : {}),
+        }),
       });
       // Status only: Resend's error body could echo the address.
       if (!res.ok) throw new Error(`Email provider refused the message (${res.status}).`);
