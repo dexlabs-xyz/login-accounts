@@ -280,10 +280,195 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 // ---------- join / sign in (D2) ----------
 
+/** "Learn more about what this is." Points at the README until the demo post is published (Gold, 11 Nov). */
+const LEARN_MORE_URL = 'https://github.com/dexlabs-xyz/login-accounts#readme';
+
+/** Format check only, in the browser. Never asks the server whether an address has an account (no account probing). */
+const EMAIL_FORMAT = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
+/** The spinner shows for 2 s after typing pauses before the result (Gold: an instant result felt abrupt). */
+const EMAIL_CHECK_DELAY_MS = 2000;
+type EmailCheck = 'empty' | 'checking' | 'valid' | 'invalid';
+
+/** Waits until typing pauses, then checks the format: spinner, then a tick or a cross. */
+function useEmailCheck(email: string): EmailCheck {
+  const [check, setCheck] = useState<EmailCheck>('empty');
+  useEffect(() => {
+    const value = email.trim();
+    if (!value) {
+      setCheck('empty');
+      return;
+    }
+    setCheck('checking');
+    const t = setTimeout(() => setCheck(EMAIL_FORMAT.test(value) ? 'valid' : 'invalid'), EMAIL_CHECK_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [email]);
+  return check;
+}
+
+/** Busy states last at least this long, so a fast reply doesn't flash past (Gold, 11 Nov). */
+const MIN_BUSY_MS = 2000;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+async function atLeast<T>(work: Promise<T>, ms: number): Promise<T> {
+  const floor = sleep(ms);
+  try {
+    const value = await work;
+    await floor;
+    return value;
+  } catch (e) {
+    await floor;
+    throw e;
+  }
+}
+
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Swaps two stacked faces of a button (e.g. "Continue" and a spinner): the one leaving
+ * slides down and fades, the one arriving drops in from above. 0.3 s, no bounce.
+ * Nothing animates on first render. Web Animations API, no library.
+ */
+function useFaceSwap(showSecond: boolean) {
+  const first = useRef<HTMLSpanElement>(null);
+  const second = useRef<HTMLSpanElement>(null);
+  // Animate only when the value actually changes. (A "first run" flag isn't enough: React's development
+  // mode runs effects twice on load, which made the swap play on every reload.)
+  const shown = useRef(showSecond);
+  useEffect(() => {
+    if (shown.current === showSecond) return;
+    shown.current = showSecond;
+    const [enter, exit] = showSecond ? [second.current, first.current] : [first.current, second.current];
+    if (!enter || !exit || prefersReducedMotion()) return;
+    const timing = { duration: 300, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' };
+    enter.animate([{ opacity: 0, transform: 'translateY(-25px)' }, { opacity: 1, transform: 'none' }], timing);
+    exit.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(25px)' }], timing);
+  }, [showSecond]);
+  return { first, second };
+}
+
+/** The centred layout of the sign-up and sign-in screens. */
+function Welcome({
+  heading,
+  intro,
+  icon = 'none',
+  onBack,
+  learnMore = true,
+  stepKey,
+  children,
+}: {
+  heading: string;
+  intro?: string;
+  /** The sign-up screen has no image (Gold removed the globe, 11 Nov); the code screen shows the mail badge. */
+  icon?: 'none' | 'mail';
+  onBack?: () => void;
+  /** "Learn more about what this is." shows only on the first sign-up/sign-in screen (Gold, 11 Nov). */
+  learnMore?: boolean;
+  /** Changes when the step changes, so the new step fades in. */
+  stepKey?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <main className="welcome">
+      {onBack && (
+        <button type="button" className="welcome-back" onClick={onBack}>
+          <img src="/img/chevron-left.svg" alt="" width={20} height={20} />
+          Go back
+        </button>
+      )}
+      <div className="welcome-body" key={stepKey}>
+        {icon === 'mail' && <img className="welcome-badge" src="/img/mail-badge.svg" alt="" width={67} height={67} />}
+        <div className="welcome-title">
+          <h1>{heading}</h1>
+          {intro && <p>{intro}</p>}
+        </div>
+        {children}
+      </div>
+      <footer className="welcome-foot">
+        {learnMore && (
+          <a href={LEARN_MORE_URL} target="_blank" rel="noreferrer">
+            Learn more about what this is.
+          </a>
+        )}
+      </footer>
+    </main>
+  );
+}
+
+/** "olufoworagud@gmail.com" → "o…gud@gmail.com", as in the design. Short names are shown whole. */
+function maskEmail(email: string): string {
+  const [local = '', domain = ''] = email.trim().toLowerCase().split('@');
+  return local.length > 5 ? `${local[0]}…${local.slice(-3)}@${domain}` : `${local}@${domain}`;
+}
+
+/** checking: the server is checking (no colour yet). valid: accepted (green). wrong: refused (red). */
+type CodeState = 'idle' | 'checking' | 'valid' | 'wrong';
+
+/**
+ * Six boxes over one real input (one-time-code), so typing, pasting, backspace and the
+ * device's "code from email" suggestion all work, and screen readers hear one field.
+ */
+function CodeBoxes({
+  value,
+  onChange,
+  state,
+  shaking,
+  onShakeEnd,
+  inputRef,
+}: {
+  value: string;
+  onChange: (digits: string) => void;
+  state: CodeState;
+  shaking: boolean;
+  onShakeEnd: () => void;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+}) {
+  const [focused, setFocused] = useState(false);
+  const active = Math.min(value.length, 5);
+  return (
+    <div
+      className={`otp${shaking ? ' shake' : ''}`}
+      data-state={state}
+      onAnimationEnd={(e) => e.animationName === 'shake' && onShakeEnd()}
+    >
+      <label htmlFor="join-code" className="visually-hidden">
+        6-digit code
+      </label>
+      <input
+        ref={inputRef}
+        id="join-code"
+        className="otp-input"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        pattern="\d{6}"
+        maxLength={6}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        readOnly={state === 'checking' || state === 'valid'}
+        aria-invalid={state === 'wrong'}
+        required
+      />
+      <div className="otp-boxes" aria-hidden="true">
+        {Array.from({ length: 6 }, (_, i) => (
+          <span key={i} className={`otp-box${focused && state === 'idle' && i === active ? ' is-active' : ''}`}>
+            {value[i] ? (
+              <span className="otp-digit" key={value[i] + i}>
+                {value[i]}
+              </span>
+            ) : focused && state === 'idle' && i === active ? (
+              <span className="otp-caret" />
+            ) : null}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Join({
   onDone,
-  heading = 'Sign up or sign in',
-  intro,
+  heading = 'Welcome',
+  intro = 'Sign Up or Sign In to continue',
   onCancel,
 }: {
   onDone: (o: WalletOutcome) => void;
@@ -294,8 +479,29 @@ function Join({
   const [step, setStep] = useState<'email' | 'code' | 'working'>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
+  const [codeState, setCodeState] = useState<CodeState>('idle');
+  const [codeShaking, setCodeShaking] = useState(false);
+  /** A plain wrong code is shown by the red boxes alone (Gold, 11 Nov); the words stay for screen readers only. */
+  const [quietError, setQuietError] = useState(false);
+  const codeInput = useRef<HTMLInputElement>(null);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const check = useEmailCheck(email);
+  const continueFaces = useFaceSwap(sending);
+  const emailInput = useRef<HTMLInputElement>(null);
+  // Land in the field of each step, ready to type: the email on every visit and reload, the code once it's sent.
+  useEffect(() => {
+    const field = step === 'email' ? emailInput : step === 'code' ? codeInput : null;
+    if (!field) return;
+    const t = requestAnimationFrame(() => field.current?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(t);
+  }, [step]);
+  /** The email field shakes once for an error: a bad format, or the server refusing to send a code. */
+  const [shaking, setShaking] = useState(false);
+  useEffect(() => {
+    if (check === 'invalid') setShaking(true);
+  }, [check]);
 
   // Passkey autofill: returning users pick their passkey from the email field.
   // Started once per page visit; the ref keeps a re-render from restarting it.
@@ -327,87 +533,201 @@ function Join({
 
   const sendCode = () =>
     run(async () => {
-      await api('POST', '/api/email/start', { email });
+      setSending(true);
+      try {
+        await atLeast(api('POST', '/api/email/start', { email }), MIN_BUSY_MS);
+      } catch (e) {
+        setShaking(true);
+        throw e;
+      } finally {
+        setSending(false);
+      }
+      if (step === 'code') setInfo(`We sent a new code to ${email.trim().toLowerCase()}.`);
+      setCode('');
+      setCodeState('idle');
       setStep('code');
-      setInfo(`We sent a 6-digit code to ${email.trim().toLowerCase()}.`);
+      codeInput.current?.focus();
     });
 
-  const verify = () =>
+  /**
+   * Sent as soon as the sixth digit is in (no Verify button in the design), and checked at once:
+   * green only when the server accepts it, then the loading spinner; red if it's refused.
+   */
+  const verify = (digits: string) =>
     run(async () => {
-      const r = await api<{ status: 'new'; ticket: string } | { status: 'existing' }>('POST', '/api/email/verify', {
-        email,
-        code,
-      });
+      setCodeState('checking');
+      let r: { status: 'new'; ticket: string } | { status: 'existing' };
+      try {
+        r = await api('POST', '/api/email/verify', { email, code: digits });
+      } catch (e) {
+        setCodeState('wrong');
+        setCodeShaking(true);
+        setQuietError(e instanceof ApiError && e.code === 'wrong-code');
+        throw e;
+      }
+      setCodeState('valid');
       if (r.status === 'existing') {
+        await sleep(600); // let the green register before going back to sign in
+        setCodeState('idle');
+        setCode('');
         setStep('email');
         setInfo('You already have an account. Sign in with your passkey.');
         return;
       }
       setStep('working');
       setInfo('Create your passkey. Your device may ask twice: once to create it, once to set up your wallet.');
-      onDone(await signUp(r.ticket));
+      try {
+        onDone(await signUp(r.ticket));
+      } catch (e) {
+        // The code is used up once accepted: start again from a fresh code.
+        setCodeState('idle');
+        setCode('');
+        throw e;
+      }
     });
 
+  // The check is normally instant; only if it's slow does the spinner appear (no flash on a fast reply).
+  const [slowCheck, setSlowCheck] = useState(false);
+  useEffect(() => {
+    setSlowCheck(false);
+    if (codeState !== 'checking') return;
+    const t = setTimeout(() => setSlowCheck(true), 400);
+    return () => clearTimeout(t);
+  }, [codeState]);
+
+  const onCode = (digits: string) => {
+    setCode(digits);
+    if (codeState === 'wrong') {
+      setCodeState('idle');
+      setError('');
+    }
+    if (digits.length === 6 && codeState !== 'checking' && codeState !== 'valid') void verify(digits);
+  };
+
+  const backToEmail = () => {
+    setStep('email');
+    setCode('');
+    setCodeState('idle');
+    setError('');
+    setInfo('');
+  };
+
+  const fieldIcon =
+    check === 'checking' ? (
+      <img className="field-icon" src="/img/loader-spinning.svg" alt="" width={24} height={24} />
+    ) : check === 'valid' ? (
+      <img className="field-icon pop" src="/img/check-circled.svg" alt="" width={24} height={24} />
+    ) : check === 'invalid' ? (
+      <button
+        type="button"
+        className="field-icon field-clear pop"
+        aria-label="Clear"
+        onClick={() => {
+          setEmail('');
+          emailInput.current?.focus();
+        }}
+      >
+        <img src="/img/x-circled.svg" alt="" width={24} height={24} />
+      </button>
+    ) : null;
+
   return (
-    <Shell>
-      <h1>{heading}</h1>
-      {intro && <p className="muted">{intro}</p>}
+    <Welcome
+      stepKey={step === 'email' ? 'email' : 'code'}
+      heading={step === 'email' ? heading : 'Check your email'}
+      intro={step === 'email' ? intro : `Enter the code we sent to ${maskEmail(email)}`}
+      icon={step === 'email' ? 'none' : 'mail'}
+      learnMore={step === 'email'}
+      onBack={step === 'code' ? backToEmail : undefined}
+    >
       {step === 'email' && (
-        <form className="stack" onSubmit={(e) => (e.preventDefault(), void sendCode())}>
-          <label>
-            Email
-            <input
-              type="email"
-              name="email"
-              autoComplete="email webauthn"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoFocus
-            />
-          </label>
-          <button type="submit" className="primary">Continue</button>
-          <div className="or">or</div>
-          <button type="button" onClick={() => run(async () => onDone(await signIn()))}>
+        <form className="welcome-form" onSubmit={(e) => (e.preventDefault(), check === 'valid' && !sending && void sendCode())}>
+          <div className="welcome-fields">
+            <div
+              className={`field${shaking ? ' shake' : ''}`}
+              data-check={check}
+              onAnimationEnd={(e) => e.animationName === 'shake' && setShaking(false)}
+            >
+              <label htmlFor="join-email" className="visually-hidden">
+                Email
+              </label>
+              <input
+                ref={emailInput}
+                id="join-email"
+                type="email"
+                name="email"
+                placeholder="Email"
+                autoComplete="email webauthn"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                aria-invalid={check === 'invalid'}
+                className={check === 'valid' ? 'shimmer' : undefined}
+                readOnly={sending}
+                required
+                autoFocus
+              />
+              {fieldIcon}
+            </div>
+            <button
+              type="submit"
+              className={`cta${sending ? ' is-loading' : ''}`}
+              disabled={check !== 'valid' || sending}
+              aria-busy={sending}
+            >
+              <span ref={continueFaces.first} className={`cta-face${sending ? ' is-out' : ''}`}>
+                Continue
+              </span>
+              <span ref={continueFaces.second} className={`cta-face${sending ? '' : ' is-out'}`} aria-hidden="true">
+                <img src="/img/loader-spinning.svg" alt="" width={39} height={39} />
+              </span>
+            </button>
+          </div>
+          <div className="or" aria-hidden="true">
+            <span>Or</span>
+          </div>
+          <button type="button" className="passkey-btn" disabled={sending} onClick={() => run(async () => onDone(await signIn()))}>
+            <img src="/img/fingerprint.svg" alt="" width={30} height={30} />
             Sign in with passkey
           </button>
         </form>
       )}
-      {step === 'code' && (
-        <form className="stack" onSubmit={(e) => (e.preventDefault(), void verify())}>
-          <label>
-            6-digit code
-            <input
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              pattern="\d{6}"
-              maxLength={6}
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-              required
-              autoFocus
-            />
-          </label>
-          <button type="submit" className="primary">Verify</button>
-          <div className="row">
-            <button type="button" className="link" onClick={() => (setStep('email'), setCode(''))}>
-              ← Use a different email
-            </button>
-            <button type="button" className="link" onClick={() => void sendCode()}>
-              Send a new code
-            </button>
+      {(step === 'code' || step === 'working') && (
+        <form className="otp-form" onSubmit={(e) => (e.preventDefault(), code.length === 6 && void verify(code))}>
+          <CodeBoxes
+            value={code}
+            onChange={onCode}
+            state={step === 'working' ? 'valid' : codeState}
+            shaking={codeShaking}
+            onShakeEnd={() => setCodeShaking(false)}
+            inputRef={codeInput}
+          />
+          <div className="otp-after">
+            {codeState === 'valid' || step === 'working' || sending || (codeState === 'checking' && slowCheck) ? (
+              <img className="otp-spinner" src="/img/loader-spinning.svg" alt="" width={28} height={28} />
+            ) : (
+              <button type="button" className="otp-resend" onClick={() => void sendCode()}>
+                Resend code
+              </button>
+            )}
           </div>
+          {step === 'working' && <p className="visually-hidden" role="status">Waiting for your passkey…</p>}
         </form>
       )}
-      {step === 'working' && <p className="muted">Waiting for your passkey…</p>}
-      {info && <p className="info" role="status">{info}</p>}
-      {error && <p className="error" role="alert">{error}</p>}
-      {onCancel && (
-        <button type="button" className="link" onClick={onCancel}>
-          Cancel and go back to the app
-        </button>
-      )}
-    </Shell>
+      {/* Hangs below the centred content, so a message appearing never moves the form. */}
+      <div className="welcome-messages">
+        {info && <p className="info" role="status">{info}</p>}
+        {error && (
+          <p className={quietError && codeState === 'wrong' ? 'visually-hidden' : 'error'} role="alert">
+            {error}
+          </p>
+        )}
+        {onCancel && (
+          <button type="button" className="link" onClick={onCancel}>
+            Cancel and go back to the app
+          </button>
+        )}
+      </div>
+    </Welcome>
   );
 }
 

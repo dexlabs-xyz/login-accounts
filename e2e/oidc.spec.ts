@@ -30,7 +30,6 @@ test('passkey sign-in to OIDC: consent, pairwise IDs, fresh authentication and l
     ?.subject.match(/\d{6}/)?.[0];
   assert.ok(code);
   await page.getByLabel('6-digit code').fill(code);
-  await page.getByRole('button', { name: 'Verify', exact: true }).click();
   // The consent page tells this (unverified) user exactly what the app will see.
   await page.getByText('You haven’t verified you’re human, so it won’t see that.').waitFor();
   assert.ok(!(await page.textContent('body'))?.includes(email));

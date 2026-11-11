@@ -92,7 +92,6 @@ export async function verifyEmail(page: Page, email: string) {
   await page.getByLabel('Email').fill(email);
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByLabel('6-digit code').fill(await latestCode(page, email));
-  await page.getByRole('button', { name: 'Verify' }).click();
 }
 
 export async function signUp(page: Page, email = freshEmail()) {
@@ -108,7 +107,7 @@ export async function walletCheck(page: Page): Promise<string> {
 
 export async function signOut(page: Page) {
   await page.getByRole('button', { name: 'Sign out' }).click();
-  await expect(page.getByRole('heading', { name: 'Sign up or sign in' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome' })).toBeVisible();
 }
 
 /**

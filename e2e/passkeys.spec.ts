@@ -59,7 +59,6 @@ test.describe('sign-up', () => {
     await page.getByLabel('Email').fill(freshEmail());
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByLabel('6-digit code').fill('000000');
-    await page.getByRole('button', { name: 'Verify' }).click();
     await expect(page.getByRole('alert')).toContainText(/tries left|isn’t right/);
   });
 });
@@ -296,7 +295,6 @@ test.describe('sign-in handoff for apps (OIDC contract)', () => {
     await page.getByLabel('Email').fill(email);
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByLabel('6-digit code').fill(await latestCode(page, email));
-    await page.getByRole('button', { name: 'Verify' }).click();
     await page.waitForURL(complete('new_user-1'));
   });
 

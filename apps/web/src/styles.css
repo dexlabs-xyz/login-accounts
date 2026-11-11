@@ -1,34 +1,35 @@
+/* Geist (SIL Open Font License, public/fonts/Geist-LICENSE.txt), served by the app itself: no third-party font requests. */
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Medium.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+
+/* Colours from Gold's Figma (dark). Light mode comes later: Gold picks the inverse tokens. */
 :root {
-  --bg: #fafaf9;
-  --fg: #1c1917;
-  --muted: #78716c;
-  --line: #e7e5e4;
-  --card: #ffffff;
-  --accent: #1d4ed8;
-  --ok: #15803d;
-  --warn-bg: #fff7ed;
-  --warn-line: #fdba74;
-  --error: #b91c1c;
-  color-scheme: light;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0c0a09;
-    --fg: #f5f5f4;
-    --muted: #a8a29e;
-    --line: #292524;
-    --card: #1c1917;
-    --accent: #60a5fa;
-    --ok: #4ade80;
-    --warn-bg: #2a1a0a;
-    --warn-line: #9a3412;
-    --error: #f87171;
-    color-scheme: dark;
-  }
+  --bg: #080808;
+  --fg: #ffffff;
+  --muted: #a3a3a3;
+  --line: #262626;
+  --card: #171717;
+  --accent: #2563eb;
+  --ok: #22c55e;
+  --warn-bg: #2a1a0a;
+  --warn-line: #9a3412;
+  --error: #f87171;
+  --error-line: #dc2626;
+  --radius: 12px;
+  color-scheme: dark;
+  font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); }
+/* The page colour sits on <html> too, so overscroll and browser chrome never show a different shade. */
+html { background: var(--bg); overscroll-behavior-y: none; height: 100%; }
+/* The page is sized by its own boxes (html → body → #root), not by a viewport unit that some
+   browsers (Brave) recalculate mid-animation: it fills the window and grows with its content. */
+body { min-height: 100%; display: flex; flex-direction: column; }
+#root { flex: 1 0 auto; display: flex; flex-direction: column; }
+body { margin: 0; color: var(--fg); }
+/* One full-window background layer, drawn in a single piece. Brave painted the plain page background in
+   bands of two slightly different shades (#0A0A0A over #0C0C0C in Gold's screenshot, 11 Nov). */
+body::before { content: ''; position: fixed; inset: 0; z-index: -1; background: var(--bg); will-change: transform; pointer-events: none; }
 .shell { max-width: 30rem; margin: 0 auto; padding: 2rem 1rem 3rem; display: grid; gap: 1rem; }
 .brand { font-weight: 700; letter-spacing: -0.02em; font-size: 1.25rem; }
 h1 { font-size: 1.6rem; margin: 0.5rem 0 0; letter-spacing: -0.02em; }
@@ -44,7 +45,6 @@ button:disabled { opacity: 0.5; cursor: progress; }
 button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
 button.link { border: none; background: none; padding: 0.25rem 0; color: var(--accent); }
 button.danger { color: var(--error); }
-.or { text-align: center; color: var(--muted); font-size: 0.85rem; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 0.9rem; padding: 1rem; display: grid; gap: 0.75rem; }
 .warning { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 0.9rem; padding: 1rem; line-height: 1.5; }
 .badge { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 99px; border: 1px solid var(--line); margin-right: 0.35rem; }
@@ -63,3 +63,156 @@ code { font-family: ui-monospace, monospace; }
 select { font: inherit; padding: 0.7rem 0.8rem; border-radius: 0.6rem; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
 h3 { margin: 0.5rem 0 0; }
 .dev-detail { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; font-size: 0.8rem; background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 0.5rem; padding: 0.6rem; }
+
+/* ---------- Welcome: sign up / sign in ---------- */
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* Content centred in the window both ways; equal top and bottom padding leave room for the back link and the footer. */
+.welcome { flex: 1 0 auto; display: grid; place-items: center; padding: 88px 16px; }
+/* Top-anchored (not centred) so hints and messages appearing below push down instead of shifting the logo. */
+.welcome-body { position: relative; width: min(542px, 100%); align-self: center; display: grid; gap: 20px; justify-items: center; }
+.welcome-title { display: grid; gap: 8px; text-align: center; margin-bottom: 12px; }
+.welcome-title h1 { margin: 0; font-size: clamp(30px, 6vw, 36px); line-height: 40px; font-weight: 500; letter-spacing: normal; }
+.welcome-title p { font-size: 18px; line-height: 25px; font-weight: 400; opacity: 0.7; }
+.welcome-form { width: 100%; display: grid; gap: 20px; }
+.welcome-fields { display: grid; gap: 20px; }
+.welcome-foot { position: absolute; left: 16px; right: 16px; bottom: 24px; display: grid; justify-items: center; text-align: center; }
+.welcome-messages { position: absolute; top: calc(100% + 20px); left: 0; right: 0; display: grid; gap: 12px; justify-items: center; }
+.welcome-messages:empty { display: none; }
+.welcome-foot a { color: var(--fg); opacity: 0.4; font-size: 19.69px; line-height: 34px; text-underline-position: from-font; }
+.welcome-foot a:hover { opacity: 0.7; }
+.welcome .info, .welcome .error, .welcome > .welcome-body > .muted { width: 100%; }
+
+.field { position: relative; display: block; border-radius: var(--radius); background: var(--card); }
+.field input {
+  width: 100%; height: 54px; padding: 0 52px 0 19px; border-radius: var(--radius);
+  border: 1px solid transparent; background: transparent; color: var(--fg);
+  font-size: 20px; font-weight: 400; line-height: 28px; transition: border-color 0.2s ease;
+}
+.field input::placeholder { color: var(--fg); opacity: 0.4; }
+.field input:focus { outline: none; border-color: var(--accent); }
+.field[data-check='invalid'] input { border-color: var(--error-line); }
+.field-icon { position: absolute; right: 15px; top: 50%; width: 24px; height: 24px; margin-top: -12px; pointer-events: none; }
+.field-clear { padding: 0; border: none; background: none; border-radius: 50%; pointer-events: auto; cursor: pointer; transition: opacity 0.15s ease; }
+.field-clear img { display: block; }
+.field-clear:hover { opacity: 0.85; }
+
+/* Valid email: a green sheen passes across the text once. */
+.field input.shimmer {
+  background-image: linear-gradient(90deg, #fff 0%, #fff 35%, var(--ok) 50%, #ccc 65%, #fff 80%, #fff 100%);
+  background-size: 300% 100%; background-position: 100% 0;
+  -webkit-background-clip: text; background-clip: text; color: transparent; caret-color: var(--fg);
+  animation: shimmer 1.35s ease-out 1 forwards;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
+
+/* Spinners turn inside their own SVG (loader-spinning.svg) instead of a CSS rotation: Brave re-drew the lower page
+   in a slightly different shade while a CSS-rotated spinner ran (Gold's screen recording, 11 Nov). */
+.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.pop { animation: pop 0.25s ease-out; }
+.shake { animation: shake 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97) 1; }
+@keyframes shake {
+  20%, 80% { transform: translateX(-1px); }
+  30%, 70% { transform: translateX(2px); }
+  40%, 60% { transform: translateX(-3px); }
+  50% { transform: translateX(3px); }
+}
+@keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* Primary call to action. Dimmed (60%) until it can be used. */
+.cta {
+  position: relative; justify-self: center; width: 100%; height: 54px; border-radius: var(--radius);
+  border: none; background: var(--accent); color: #fff; font-size: 20px; font-weight: 500; line-height: 28px;
+  overflow: hidden; transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1), border-radius 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+}
+.cta:disabled { opacity: 0.6; cursor: not-allowed; }
+/* Busy: full strength, and the button collapses into a 54px circle around the spinner (Figma 369:13956). */
+.cta.is-loading { opacity: 1; cursor: progress; width: 54px; border-radius: 27px; }
+/* "Continue" and the spinner sit in the same spot; useFaceSwap animates between them. */
+.cta { padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); place-items: center; }
+.cta-face { grid-area: 1 / 1; white-space: nowrap; display: flex; align-items: center; justify-content: center; }
+.cta-face.is-out { opacity: 0; }
+.cta-face img { display: block; width: 39px; height: 39px; }
+
+.or { height: 20px; display: flex; align-items: center; gap: 20px; }
+.or::before, .or::after { content: ''; flex: 1; border-top: 0.5px solid rgba(255, 255, 255, 0.24); }
+.or span { font-size: 13.95px; line-height: 20px; opacity: 0.8; }
+.welcome-form .or { color: var(--fg); text-align: center; }
+
+.passkey-btn {
+  width: 100%; height: 54px; display: flex; align-items: center; justify-content: center; gap: 9px;
+  border: none; border-radius: var(--radius); background: var(--card); color: var(--fg);
+  font-size: 20px; font-weight: 500; line-height: 28px; transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+.passkey-btn:hover:not(:disabled) { background: #1f1f1f; }
+.passkey-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.cta:hover:not(:disabled) { background: #1d4ed8; }
+
+.cta:focus-visible, .passkey-btn:focus-visible, .welcome-foot a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .field input, .cta, .passkey-btn { font-size: 17px; }
+  .welcome-title p { font-size: 16px; }
+  .welcome-foot a { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field input.shimmer { animation: none; color: var(--fg); background-image: none; }
+  .pop, .shake { animation: none; }
+  .cta, .field input { transition: none; }
+  .spin { animation-duration: 2s; }
+}
+
+/* ---------- Code entry (Figma 44:49 / 369:13781 / 48:2 / 48:49) ---------- */
+@font-face { font-family: 'Geist Mono'; src: url('/fonts/GeistMono-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+
+/* Each step fades up into place. */
+.welcome-body { animation: step-in 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes step-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.welcome-badge { width: 67px; height: 67px; margin-bottom: 4px; }
+.welcome-title p { overflow-wrap: anywhere; }
+
+.welcome-back {
+  position: absolute; left: 43px; top: 31px; display: flex; align-items: center; gap: 2px;
+  padding: 4px 6px 4px 0; border: none; background: none; color: var(--fg); opacity: 0.8;
+  font-size: 18px; font-weight: 500; line-height: 25px; border-radius: 8px; transition: opacity 0.15s ease;
+}
+.welcome-back:hover { opacity: 1; }
+.welcome { position: relative; }
+
+.otp-form { display: grid; justify-items: center; gap: 30px; width: 100%; }
+.otp { position: relative; width: 358px; max-width: 100%; }
+/* The real field sits invisibly on top of the boxes: clicks, typing, paste and autofill go to it. */
+.otp-input {
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; z-index: 1;
+  font-size: 16px; padding: 0; border: none; cursor: text;
+}
+.otp-boxes { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.otp-box {
+  height: 54px; border-radius: var(--radius); background: var(--card); border: 1px solid transparent;
+  display: grid; place-items: center; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 17.45px; line-height: 25px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.otp-box.is-active { border-color: var(--accent); }
+.otp[data-state='valid'] .otp-box { box-shadow: 0 0 0.846px 0.423px #49e63b; }
+.otp[data-state='wrong'] .otp-box { border-color: #991b1b; }
+.otp-digit { animation: pop 0.2s ease-out; }
+.otp-caret { width: 1px; height: 25px; background: #d9d9d9; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.otp-after { min-height: 28px; display: grid; place-items: center; }
+.otp-resend { border: none; background: none; padding: 2px 6px; color: var(--fg); opacity: 0.9; font-size: 18px; line-height: 25px; border-radius: 8px; }
+.otp-resend:hover { opacity: 1; text-decoration: underline; text-underline-position: from-font; }
+.otp-spinner { width: 28px; height: 28px; }
+
+@media (max-width: 480px) {
+  .welcome-back { left: 16px; top: 16px; font-size: 16px; }
+  .otp-resend { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .welcome-body, .otp-digit { animation: none; }
+  .otp-caret { animation: none; }
+}
