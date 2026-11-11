@@ -27,7 +27,7 @@ const newestFirst = (a: HistoryEntry, b: HistoryEntry) => (b.timestamp ?? Infini
 
 const STATUS: Record<NonNullable<HistoryEntry['status']>, string> = {
   checking: 'Being checked (privacy check)',
-  spendable: 'Spendable',
+  spendable: 'Cleared',
   blocked: 'Blocked by sanctions screening',
 };
 
