@@ -123,7 +123,8 @@ easy to get wrong (USDC sent to a USDT address sat unnoticed overnight).
 - **Refunds:** EVM origins refund to the user's own derived address on the
   sending chain; Solana refunds to the Solana wallet the user sends from.
 - **Sending chains for the hackathon:** Ethereum, Base and Arbitrum Sepolia,
-  plus Solana devnet.
+  plus Solana devnet. *(Superseded: deposits now come from Ethereum Sepolia
+  and Solana devnet only; see above.)*
 - **Built 2026-11-05** (`apps/web/src/deposits/`, `railgun/deposits.ts`). Details:
   - Approves exactly the deposit amount to Railgun, never an unlimited allowance.
   - Every Tidepool response is checked: the destination must be our verified
@@ -141,7 +142,7 @@ easy to get wrong (USDC sent to a USDT address sat unnoticed overnight).
     "being checked" to **Spendable** (4.97 USDT from 5 USDC).
   - Measured clearing time for a fresh deposit on Sepolia: 52 and 74 minutes,
     and a third run still pending after 90 minutes (2026-11-05). The screen
-    says "usually about an hour, sometimes longer".
+    says "from a few minutes to about two hours".
     The wallet's 15-minute idle lock (D5) can fire while a user waits; the
     balance catches up on the next unlock.
   - Private send verified end to end 2026-11-05 (`e2e/send.spec.ts`): proof
@@ -192,7 +193,17 @@ easy to get wrong (USDC sent to a USDT address sat unnoticed overnight).
     The withdrawal is saved (encrypted, on this device) before it's sent, so
     a reload keeps following it. Tidepool sees the destination address, as it
     does for any swap; on-chain, the unshield goes to Tidepool's address, not
-    the user's.
+    the user's. Verified live 9-10 Nov: ETH on Sepolia and USDC on Base
+    Sepolia (twice each).
+  - **Known limit: the leftover after a spend never clears (parked
+    2026-11-11, team lead).** After any send or withdrawal, the change
+    (USDT and the fee reserve's WETH) stays "Missing" on the required POI
+    list (Chainalysis OFAC) for 2.5+ hours in every test. The POI node is
+    synced and processes other Sepolia transactions, but ours never land.
+    Asking it every minute didn't help (tried and reverted). Likely the same root cause as the test-funds pool's stuck
+    change (Railgun's broken Sepolia TXID index, below). Workaround: each
+    deposit pays for one transaction, so demo accounts get one deposit per
+    planned transaction (`docs/demo-script.md`).
 
 ### Smart accounts
 
@@ -288,7 +299,7 @@ Code: `apps/server/src/test-funds/`.
   transfer needs the pool to publish its own Proof of Innocence data, which
   depends on Railgun's Sepolia transaction index (TXID tree). Railgun's public
   Sepolia indexer has a broken checksum chain at position 4188 (block
-  11816741; reported to Railgun), so the engine's index stops at 4177 and the
+  11816741; a bug report is drafted, but we have no Railgun contact yet), so the engine's index stops at 4177 and the
   first claim's change (~198k USDT, 0.149 WETH) is stuck in "missing privacy
   check". The pool's private upkeep still runs: if Railgun repairs the index,
   that balance clears on its own (`src/scripts/pool-poi-status.ts` checks,

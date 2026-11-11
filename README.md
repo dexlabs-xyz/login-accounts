@@ -30,7 +30,8 @@ chains, built on **NEAR Intents** and **Railgun**.
 6. **Verify you're human** (optional, Sumsub sandbox), and **continue with
    Login** on other apps: they learn only that you're a verified human, with a
    different ID per app. Never your email. The account page lists each app
-   you've signed in to and what it sees.
+   you've signed in to and what it sees. Two steps are offered: *verified
+   human* (a selfie video) and *verified identity* (an ID document).
 
 Everything moves in one currency on screen: USDT. Every send and withdrawal is
 confirmed with your passkey after a summary.
@@ -69,8 +70,16 @@ and must never reach mainnet:
 - **Mainnet price check:** the only mainnet contact. `dry` quotes with a
   placeholder address; nothing can be sent.
 
-Also worth knowing: new deposits wait for Railgun's privacy check ("being
-checked"), usually one to two hours, before they can be spent.
+Also worth knowing:
+
+- New deposits wait for Railgun's privacy check ("being checked"), from a few
+  minutes to about two hours, before they can be spent.
+- **Known limit on Sepolia:** after a send or withdrawal, the leftover
+  (including the fee reserve) stays "Waiting for privacy check" and doesn't
+  clear. The likely cause is Railgun's broken public Sepolia transaction
+  index (see the design doc). In practice, **each
+  deposit pays for one transaction**: an account with three deposits can make
+  three sends or withdrawals. Parked until after the hackathon.
 
 ### Not built yet (next)
 
@@ -83,6 +92,10 @@ checked"), usually one to two hours, before they can be spent.
   register their own apps (name, exact callback, proven domain) and get a
   client ID without a redeploy.
 - **A mainnet version**, without the testnet-only exceptions above.
+- **A forwarding email for each app** (like Apple's Hide My Email), so apps
+  can reach you without being able to link you across sites.
+- **Verified address** (proof of address), once dexlabs is verified at Sumsub.
+- **Solana deposits of any amount** (today you pick the exact amount first).
 
 ## Run it locally
 

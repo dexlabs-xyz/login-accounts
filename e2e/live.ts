@@ -34,7 +34,7 @@ export async function watch(page: Page, testId: string, until: RegExp, timeout: 
  */
 export async function fundedAccount(page: Page, say: (m: string) => void) {
   await disableAutofill(page);
-  page.on('console', (m) => m.type() === 'error' && /railgun/i.test(m.text()) && say(`console: ${m.text().slice(0, 400)}`));
+  page.on('console', (m) => (m.type() === 'error' && /railgun/i.test(m.text())) || m.text().startsWith('[railgun POI]') ? say(`console: ${m.text().slice(0, 400)}`) : undefined);
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
@@ -59,13 +59,25 @@ export async function fundedAccount(page: Page, say: (m: string) => void) {
   say('test funds sent');
 
   const funder = Wallet.createRandom().connect(provider); // throwaway, testnet only
-  expect((await page.request.post('/api/testnet-gas', { data: { address: funder.address } })).ok()).toBe(true);
+  const gas = await page.request.post('/api/testnet-gas', { data: { address: funder.address } });
+  if (!gas.ok()) say(`gas faucet refused: HTTP ${gas.status()} ${(await gas.text()).slice(0, 200)}`);
+  expect(gas.ok()).toBe(true);
   await expect.poll(async () => (await provider.getBalance(funder.address)) >= parseEther('0.0035'), { timeout: 180_000, intervals: [5_000] }).toBe(true);
 
   const add = page.getByRole('region', { name: /Add money/ });
   await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
   const depositTo = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
-  await (await funder.sendTransaction({ to: depositTo, value: parseEther('0.003') })).wait(1);
+  // The public RPC sometimes fails gas estimation on a plain transfer (seen 9 Nov 2026): retry.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await (await funder.sendTransaction({ to: depositTo, value: parseEther('0.003') })).wait(1);
+      break;
+    } catch (e) {
+      if (attempt >= 4) throw e;
+      say(`deposit send failed (attempt ${attempt}), retrying: ${String(e).slice(0, 120)}`);
+      await page.waitForTimeout(10_000);
+    }
+  }
   await watch(page, 'active-deposit-status', /^Done\./, 20 * 60_000, say);
 
   // Measured on Sepolia, 5 Nov 2026: fresh shields took 52, 74 and over 90 minutes to clear.
