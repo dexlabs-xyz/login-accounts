@@ -17,6 +17,8 @@ import type { Config } from '../config.ts';
 import type { DB } from '../db.ts';
 import { ApiError, readJson as json } from '../http.ts';
 import type { Mailer, OutboxEmail } from '../mail.ts';
+import { codeEmail } from '../code-email.ts';
+import { welcomeEmail } from '../welcome-email.ts';
 import type { Sessions } from './session.ts';
 
 const MINUTE = 60_000;
@@ -213,11 +215,8 @@ export function passkeyRoutes({ config, db, sessions, mailer, outbox, now = Date
        ON CONFLICT(email) DO UPDATE SET code_hash = excluded.code_hash, attempts = 0, sent_at = excluded.sent_at, expires_at = excluded.expires_at`,
     ).run(email, sha256(`${email}:${code}`), now(), now() + CODE_TTL);
     // Same response whether or not the email has an account, so this can't be used to probe.
-    await mailer.send({
-      to: email,
-      subject: `${code} is your Login code`,
-      body: `Your Login code is ${code}. It expires in 10 minutes. If you didn't ask for it, ignore this email.`,
-    });
+    const m = codeEmail(code);
+    await mailer.send({ to: email, subject: m.subject, body: m.text, html: m.html });
     return c.json({ ok: true });
   });
 
@@ -287,6 +286,7 @@ export function passkeyRoutes({ config, db, sessions, mailer, outbox, now = Date
     const info = await verifyRegistration(body.response, challenge);
 
     const userId = randomBytes(16).toString('base64url');
+    let cred: ReturnType<typeof insertCredential>;
     db.exec('BEGIN');
     try {
       if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(t.email)) throw new ApiError(409, 'email-taken');
@@ -296,16 +296,32 @@ export function passkeyRoutes({ config, db, sessions, mailer, outbox, now = Date
         t.webauthn_user_id,
         now(),
       );
-      const cred = insertCredential(userId, info);
+      cred = insertCredential(userId, info);
       db.prepare('DELETE FROM signup_tickets WHERE token_hash = ?').run(t.token_hash);
       db.exec('COMMIT');
-      startSession(c, userId);
-      return c.json({ userId, credential: publicCredential(cred) });
     } catch (err) {
       db.exec('ROLLBACK');
       throw err;
     }
+    startSession(c, userId);
+    void sendWelcome(t.email); // in the background: sign-up never waits for the email provider
+    return c.json({ userId, credential: publicCredential(cred) });
   });
+
+  /**
+   * The welcome email, once per new account (welcome-email.ts). Started
+   * without waiting, after the account exists, so a slow or failed send never
+   * holds up or fails sign-up. Never throws. The log line says only that it
+   * failed, never the address.
+   */
+  const sendWelcome = async (to: string) => {
+    const w = welcomeEmail(config.origins[0]!);
+    try {
+      await mailer.send({ to, subject: w.subject, body: w.text, html: w.html });
+    } catch (err) {
+      console.error('Welcome email not sent:', err instanceof Error ? err.message : 'unknown');
+    }
+  };
 
   // ---------- sign-in (also used to unlock the wallet and confirm sends, D5) ----------
 
