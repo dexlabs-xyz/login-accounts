@@ -17,6 +17,8 @@
  * from the server's config.
  */
 
+import { emailLogo } from './email-logo.ts';
+
 export interface WelcomeEmail {
   subject: string;
   /** Plain-text copy for email apps that can't show the design. */
@@ -70,7 +72,7 @@ export function welcomeEmail(appUrl: string): WelcomeEmail {
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="${card}">
   <tr>
-    <td style="padding:32px 28px;${font}">
+    <td style="padding:28px 28px 32px;${font}">${emailLogo(font)}
       <h1 style="margin:0 0 20px 0;${font}font-size:32px;line-height:1.2;font-weight:600;letter-spacing:-0.02em;color:#0F172A;">Welcome to Login.</h1>
       <p style="margin:0 0 16px 0;${font}font-size:16px;line-height:1.6;color:#0F172A;">Hi there,</p>
       <p style="margin:0 0 24px 0;${font}font-size:16px;line-height:1.6;color:#475569;">Your account is ready, and your passkey is your key. Only your passkey can open your wallet. Not even Login can.</p>
@@ -115,7 +117,7 @@ export function welcomeEmail(appUrl: string): WelcomeEmail {
           </td>
         </tr>
       </table>
-      <p style="margin:22px 0 0 0;${font}font-size:16px;line-height:1.5;color:#0F172A;">High fives,<br><span style="font-weight:600;color:#2563EB;">Team Login.</span></p>
+      <p style="margin:22px 0 0 0;${font}font-size:16px;line-height:1.5;color:#0F172A;">High fives,<br><span style="font-weight:600;color:#2563EB;">The Login team at Dexlabs</span></p>
     </td>
   </tr>
 </table>
@@ -144,7 +146,7 @@ One important note:
 - Login will never ask for your password, recovery phrase or ID by email.
 
 High fives,
-Team Login.
+The Login team at Dexlabs
 `;
 
   return { subject: 'Welcome to Login', text, html };

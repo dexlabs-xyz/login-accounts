@@ -20,7 +20,7 @@ describe('sign-in code email', () => {
       'It expires in 10 minutes.',
       'If you didn’t ask for it, ignore this email.',
       'Login will never ask you for this code by phone, chat or email.',
-      'Team Login.',
+      'The Login team at Dexlabs',
     ]) {
       expect(m.html).toContain(part);
     }
