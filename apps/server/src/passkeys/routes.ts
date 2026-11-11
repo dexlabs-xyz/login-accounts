@@ -304,14 +304,15 @@ export function passkeyRoutes({ config, db, sessions, mailer, outbox, now = Date
       throw err;
     }
     startSession(c, userId);
-    await sendWelcome(t.email);
+    void sendWelcome(t.email); // in the background: sign-up never waits for the email provider
     return c.json({ userId, credential: publicCredential(cred) });
   });
 
   /**
-   * The welcome email, once per new account (welcome-email.ts). The account
-   * already exists by now, so a failed send never fails sign-up. The log line
-   * says only that it failed, never the address.
+   * The welcome email, once per new account (welcome-email.ts). Started
+   * without waiting, after the account exists, so a slow or failed send never
+   * holds up or fails sign-up. Never throws. The log line says only that it
+   * failed, never the address.
    */
   const sendWelcome = async (to: string) => {
     const w = welcomeEmail(config.origins[0]!);

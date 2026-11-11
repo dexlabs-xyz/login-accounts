@@ -32,6 +32,12 @@ describe('welcome email', () => {
     expect(welcomeEmail('http://localhost:5180').html).toContain('src="http://localhost:5180/email/icon-plus.png"');
   });
 
+  it('loads no web fonts, so opening it contacts no one but our own site', () => {
+    expect(w.html).not.toMatch(/fonts\.googleapis|fonts\.gstatic|@import|<link/i);
+    const hosts = new Set([...w.html.matchAll(/(?:src|href)="https?:\/\/([^/"]+)/g)].map((m) => m[1]));
+    expect([...hosts]).toEqual(['demo.withlogin.com']);
+  });
+
   it('uses images, not inline SVG (Gmail and Outlook drop SVG)', () => {
     expect(w.html).not.toMatch(/<svg/i);
   });
@@ -67,6 +73,18 @@ describe('Resend mailer', () => {
     const { bodies, mailer } = capture();
     await mailer.send({ to: 'ada@example.com', subject: '123456 is your Login code', body: 'code' });
     expect(bodies[0]).not.toHaveProperty('html');
+  });
+
+  it('gives up on a provider that never answers', async () => {
+    const mailer = resendMailer({
+      apiKey: 'k',
+      from: 'x',
+      timeoutMs: 50,
+      // Never answers: only the abort signal can end this request.
+      fetch: ((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)))) as typeof globalThis.fetch,
+    });
+    await expect(mailer.send({ to: 'ada@example.com', subject: 's', body: 'b' })).rejects.toThrow(/timeout|abort/i);
   });
 
   it('reports a refusal without echoing the address', async () => {

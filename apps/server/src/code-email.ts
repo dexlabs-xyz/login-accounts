@@ -3,6 +3,8 @@
  * email (welcome-email.ts): one card, the code in Geist Mono in a light blue
  * panel. No links, buttons or images, so it loads fast and doesn't look like
  * phishing. The subject keeps the code, so people can read it from their inbox.
+ * No web fonts, for the same privacy reason as welcome-email.ts: the code
+ * falls back to the reader's own monospace font.
  */
 
 export interface CodeEmail {
@@ -24,9 +26,6 @@ export function codeEmail(code: string): CodeEmail {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <title>Your Login code</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@500;600&display=swap');
-</style>
 </head>
 <body style="margin:0;padding:16px;background:#FFFFFF;">
 

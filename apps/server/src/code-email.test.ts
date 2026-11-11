@@ -30,8 +30,8 @@ describe('sign-in code email', () => {
     expect(m.html).toMatch(/font-family:'Geist Mono'[^"]*">482913</);
   });
 
-  it('has no links, buttons or images', () => {
-    expect(m.html).not.toMatch(/<a\s|<img\s|<svg/i);
+  it('has no links, buttons, images or web fonts, so opening it contacts no one', () => {
+    expect(m.html).not.toMatch(/<a\s|<img\s|<svg|<link|@import|https?:\/\//i);
   });
 
   it('accepts only a 6-digit code', () => {

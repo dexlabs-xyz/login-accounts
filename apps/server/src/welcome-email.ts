@@ -7,6 +7,11 @@
  * Icons are PNGs served by the web app (apps/web/public/email/), because Gmail
  * and Outlook drop inline SVG.
  *
+ * No web fonts: loading one (e.g. from Google Fonts) would make the reader's
+ * email app contact a third party with their IP address every time they open
+ * it. 'Geist' is named first only for people who have it installed; everyone
+ * else gets Arial.
+ *
  * Nothing about the person goes into it: Login doesn't collect names, so it
  * greets everyone with "Hi there,". The only input is the app's own address,
  * from the server's config.
@@ -60,9 +65,6 @@ export function welcomeEmail(appUrl: string): WelcomeEmail {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <title>Welcome to Login</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap');
-</style>
 </head>
 <body style="margin:0;padding:16px;background:#FFFFFF;">
 
