@@ -58,6 +58,25 @@ export function oidcRoutes(options: {
     });
     return RESPONSE_ALREADY_SENT;
   };
+  /**
+   * The apps this account has signed in to with Login, and what they can see.
+   * From oidc_subjects (one row per account and app, made when the app first gets
+   * its per-app ID). Every app sees the same: that ID, and verified_human if passed.
+   */
+  routes.get('/api/oidc/apps', async (c) => {
+    const user = options.sessions.getSignedInUser(c.req.header('cookie'));
+    if (!user) return c.json({ error: 'not-signed-in' }, 401);
+    const names = new Map(configuration.clients.map((cl) => [cl.client_id, cl.client_name]));
+    const rows = options.db
+      .prepare('SELECT client_id FROM oidc_subjects WHERE account_id = ? ORDER BY rowid')
+      .all(user.userId) as { client_id: string }[];
+    const kyc = (await options.getKycClaims?.(user.userId, ['openid'])) ?? {};
+    return c.json({
+      apps: rows.map((r) => ({ name: names.get(r.client_id) ?? 'An app no longer listed' })),
+      verifiedHuman: kyc.verified_human === true,
+      sandbox: kyc.verification_sandbox === true,
+    });
+  });
   routes.all('/oidc', handler);
   routes.all('/oidc/*', handler);
   routes.all('/.well-known/openid-configuration', handler);

@@ -21,6 +21,8 @@ async function signInToDemoApp(
     setup?: (db: DB) => void;
     hosted?: boolean;
     hostedRpId?: string;
+    /** Filled in with the consent page and /api/oidc/apps (before and after sign-in). */
+    capture?: { consent?: string; appsBefore?: unknown; appsAfter?: unknown };
   } = {},
 ) {
   const issuer = opts.hosted ? DEMO_ISSUER : 'http://localhost:5180/oidc';
@@ -138,7 +140,12 @@ async function signInToDemoApp(
     };
     const resumed = await request(pathOf(interaction.headers.get('location')!));
     const consentPath = pathOf(resumed.headers.get('location')!);
-    expect((await request(consentPath)).status).toBe(200);
+    const consent = await request(consentPath);
+    expect(consent.status).toBe(200);
+    if (opts.capture) {
+      opts.capture.consent = await consent.text();
+      opts.capture.appsBefore = await (await request('/api/oidc/apps')).json();
+    }
     if (opts.hosted) {
       const rejected = await request(consentPath + '/confirm', 'POST', {
         headers: { origin: 'https://attacker.invalid' },
@@ -167,6 +174,7 @@ async function signInToDemoApp(
         headers: { authorization: `Bearer ${tokens.access_token}` },
       })
     ).json();
+    if (opts.capture) opts.capture.appsAfter = await (await request('/api/oidc/apps')).json();
     return info as Record<string, unknown>;
   } finally {
     server.closeAllConnections();
@@ -248,4 +256,30 @@ it.each([
   } finally {
     db.close();
   }
+});
+
+it('the consent page tells a verified user exactly what the app will see; the apps list shows the app after sign-in', async () => {
+  const capture: { consent?: string; appsBefore?: unknown; appsAfter?: unknown } = {};
+  await signInToDemoApp({
+    capture,
+    setup: (db) =>
+      db
+        .prepare('INSERT INTO kyc_status (user_id, level, updated_at) VALUES (?, ?, ?)')
+        .run('test-user', 'L2', Date.now()),
+  });
+  expect(capture.consent).toContain('Chess demo will see:');
+  expect(capture.consent).toContain('verified human (test mode)');
+  expect(capture.consent).not.toContain('test@example.com');
+  expect(capture.consent).not.toContain('L2');
+  expect(capture.appsBefore).toEqual({ apps: [], verifiedHuman: true, sandbox: true });
+  expect(capture.appsAfter).toEqual({ apps: [{ name: 'Chess demo' }], verifiedHuman: true, sandbox: true });
+});
+
+it('the consent page tells an unverified user the app won’t see verified human, and how to verify', async () => {
+  const capture: { consent?: string; appsAfter?: unknown } = {};
+  const info = await signInToDemoApp({ capture });
+  expect(Object.hasOwn(info, 'verified_human')).toBe(false);
+  expect(capture.consent).toContain('You haven’t verified you’re human, so it won’t see that.');
+  expect(capture.consent).toContain('Verify on your Login account');
+  expect(capture.appsAfter).toEqual({ apps: [{ name: 'Chess demo' }], verifiedHuman: false, sandbox: false });
 });

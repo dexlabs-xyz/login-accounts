@@ -289,12 +289,19 @@ export function createOidc(options: OidcOptions) {
           return true;
         }
         const client = await provider.Client.find(String(interaction.params.client_id));
+        const name = escape(client?.clientName ?? 'this app');
+        // Show the user their own status, so they know exactly what this app will learn.
+        const kyc = (await options.getKycClaims?.(accountId, ['openid'])) ?? {};
+        const sees =
+          kyc.verified_human === true
+            ? `<p><strong>${name} will see:</strong> an ID that only this app gets, and that you’re a <strong>verified human${
+                kyc.verification_sandbox === true ? ' (test mode)' : ''
+              }</strong>.</p>`
+            : `<p><strong>${name} will see:</strong> an ID that only this app gets. You haven’t verified you’re human, so it won’t see that. <a href="/" target="_blank" rel="noopener">Verify on your Login account</a>, then sign in to this app again.</p>`;
         page(
           res,
           200,
-          `<small>Login · Testnet demo · Unaudited</small><h1>Continue to ${escape(
-            client?.clientName ?? 'this app',
-          )}?</h1><p>This app receives an ID unique to it and your human-verification status. Sandbox verification is labeled. Your email, name, wallet and identity documents are not shared.</p><form method="post" action="/oidc/interaction/${id}/confirm"><button>Allow and continue</button></form><form method="post" action="/oidc/interaction/${id}/abort"><button>Cancel</button></form>`,
+          `<small>Login · Testnet demo · Unaudited</small><h1>Continue to ${name}?</h1>${sees}<p>Your email, name, wallet and identity documents are never shared.</p><form method="post" action="/oidc/interaction/${id}/confirm"><button>Allow and continue</button></form><form method="post" action="/oidc/interaction/${id}/abort"><button>Cancel</button></form>`,
         );
         return true;
       } catch {

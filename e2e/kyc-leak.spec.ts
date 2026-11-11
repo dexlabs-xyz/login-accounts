@@ -17,7 +17,7 @@ test('no secret leaves the device while the Sumsub KYC flow runs (D6)', async ({
   await expect(page.getByRole('region', { name: /Private balance/ }).getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
 
   const kyc = page.getByRole('region', { name: 'Verification' });
-  await expect(kyc.getByText('Sandbox (test mode).')).toBeVisible({ timeout: 30_000 }); // KYC is on
+  await expect(kyc.getByText(/^Sandbox \(test mode\)/)).toBeVisible({ timeout: 30_000 }); // KYC is on
   await kyc.getByRole('button', { name: /Verify you’re human/ }).click();
   const sumsub = page.waitForRequest((r) => /sumsub\.com/.test(new URL(r.url()).hostname), { timeout: 60_000 });
   await kyc.getByRole('button', { name: 'Continue' }).click();

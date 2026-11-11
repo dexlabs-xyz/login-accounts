@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
-import { KycCard } from './Kyc.tsx';
+import { KycCard, type KycStatus } from './Kyc.tsx';
+import { ConnectedApps } from './ConnectedApps.tsx';
 import { TestFunds } from './TestFunds.tsx';
 import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS } from './railgun/protocol.ts';
@@ -494,6 +495,7 @@ function Account({
   const [busy, setBusy] = useState(false);
   /** A passkey just added whose storage can't open wallets: ask to keep or remove it. */
   const [signInOnly, setSignInOnly] = useState<string | null>(null);
+  const [kyc, setKyc] = useState<KycStatus | undefined>(undefined);
 
   useEffect(() => {
     void wallet.fingerprint().then(setFp);
@@ -531,6 +533,20 @@ function Account({
     <Shell>
       <h1>Your account</h1>
       <p className="muted">{me.email}</p>
+      {kyc && (
+        <p data-testid="human-status">
+          {kyc.verifiedHuman ? (
+            <span className="badge ok">Verified human{kyc.sandbox ? ' · test mode' : ''}</span>
+          ) : (
+            <>
+              <span className="badge">Not verified</span>{' '}
+              <a href="#kyc-h" className="small">
+                Verify you’re human
+              </a>
+            </>
+          )}
+        </p>
+      )}
 
       <section className="card" aria-labelledby="wallet-h">
         <h2 id="wallet-h">Wallet</h2>
@@ -642,7 +658,8 @@ function Account({
         {me.hasVault && !open && <p className="muted small">Unlock your wallet first so a new passkey can open it too.</p>}
       </section>
 
-      <KycCard />
+      <KycCard onStatus={setKyc} />
+      <ConnectedApps refreshKey={kyc ? String(kyc.verifiedHuman) : ''} />
 
       {/* Only while that passkey still exists: it may have been removed from the list instead. */}
       {signInOnly && me.credentials.some((c) => c.id === signInOnly) && (

@@ -29,7 +29,8 @@ chains, built on **NEAR Intents** and **Railgun**.
    swap can't be done, the USDT comes back to your private balance.
 6. **Verify you're human** (optional, Sumsub sandbox), and **continue with
    Login** on other apps: they learn only that you're a verified human, with a
-   different ID per app.
+   different ID per app. Never your email. The account page lists each app
+   you've signed in to and what it sees.
 
 Everything moves in one currency on screen: USDT. Every send and withdrawal is
 confirmed with your passkey after a summary.

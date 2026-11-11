@@ -35,6 +35,13 @@ Each level builds on the one before, so a user only ever does the extra step.
 | **L2 verified identity** | Scans an ID document | ID Verification with face match to the L1 selfie, AML Screening. Non-Doc Verification where available | `kyc_level: "L2"` (with consent) |
 | **L3 verified address** | Uploads proof of address | Proof of Address (PoA) | `kyc_level: "L3"` (with consent) |
 
+> **Hackathon scope (decided 2026-11-09, team lead):** the app offers L1 and
+> L2 only. L3 stays hidden until dexlabs is verified at Sumsub and on its Pro
+> plan. Apps receive only the per-app ID and `verified_human`: no `kyc_level`,
+> `profile` or `email` scope is offered. Sharing a real email would let apps
+> link users across sites, so email waits for per-app forwarding addresses
+> (like Apple's Hide My Email) after the hackathon.
+
 ### What "verified human" means
 
 A passkey alone doesn't prove a human: software can create unlimited passkeys.

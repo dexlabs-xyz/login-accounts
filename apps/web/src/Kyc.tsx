@@ -67,6 +67,12 @@ const SIMULATED: { result: string; label: string }[] = [
   { result: 'fraud', label: 'Reject: suspected fraud' },
 ];
 
+/**
+ * Levels offered in the app. Decision, team lead, 9 Nov 2026: Verified address
+ * (L3) stays hidden until dexlabs is verified at Sumsub and on its Pro plan.
+ */
+const OFFERED: readonly Level[] = ['L1', 'L2'];
+
 const next = (level: Level | null): Level | null => (level === null ? 'L1' : level === 'L1' ? 'L2' : level === 'L2' ? 'L3' : null);
 
 function retryMessage(reason: Reason | null): string {
@@ -109,7 +115,10 @@ function explainKyc(err: unknown): string {
   return 'Something went wrong. Try again.';
 }
 
-export function KycCard() {
+/** What the account page shows at the top: verified human or not, and whether it's test mode. */
+export type KycStatus = { verifiedHuman: boolean; sandbox: boolean } | null;
+
+export function KycCard({ onStatus }: { onStatus?: (s: KycStatus) => void } = {}) {
   const [view, setView] = useState<KycView | null>(null);
   const [stage, setStage] = useState<'idle' | 'before' | 'widget'>('idle');
   const [target, setTarget] = useState<Level | null>(null);
@@ -129,6 +138,11 @@ export function KycCard() {
       return null;
     }
   }, []);
+
+  // Tell the page whenever the result changes (loaded, refreshed, or a simulated result).
+  useEffect(() => {
+    if (view) onStatus?.(view.available ? { verifiedHuman: view.verifiedHuman, sandbox: view.sandbox } : null);
+  }, [view, onStatus]);
 
   useEffect(() => {
     void load();
@@ -250,7 +264,7 @@ export function KycCard() {
   }
 
   const following = next(view.level);
-  const nextLevel = following && view.levels.includes(following) ? following : null;
+  const nextLevel = following && view.levels.includes(following) && OFFERED.includes(following) ? following : null;
   const a = view.attempt;
   const current = a && a.state !== 'passed' && a.level === nextLevel ? a : null;
 

@@ -24,7 +24,8 @@ const ERRORS: Record<string, string> = {
   'own-deposit-address':
     'That’s one of your own Login deposit addresses. It’s publicly linked to your deposits, so withdrawing there would undo the privacy. Use a different address.',
   'insufficient-usdt': 'You don’t have that much spendable USDT. Deposits become spendable once their privacy check clears.',
-  'insufficient-fee-balance': 'Your network-fee reserve is empty, so this can’t be sent yet. Your next deposit refills it automatically.',
+  'insufficient-fee-balance':
+    'Your network-fee reserve isn’t ready, so this can’t be sent yet. Right after a send or withdrawal, it goes through the privacy check again (your balance shows “Network fees: being set up”). Try again once it shows “Network fees are covered”. If it’s used up, your next deposit refills it.',
   'no-broadcaster': 'No network relay is available right now. Try again in a minute.',
   'fee-too-high': 'The network fee quoted is unusually high, so we stopped. Try again later.',
   'quote-expired': 'The fee quote expired. Review it again.',
