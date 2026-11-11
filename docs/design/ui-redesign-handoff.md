@@ -9,7 +9,8 @@ changes **how things look and move**, not what they do or say about safety.
 - `apps/web/src/App.tsx`: shell, sign-up/sign-in, account page, private balance card.
 - `apps/web/src/deposits/AddMoney.tsx`: "Add money" (Ethereum wallet, Solana).
 - `apps/web/src/send/SendPrivately.tsx`: "Send privately" and "Withdraw".
-- `apps/web/src/TestFunds.tsx`, `Kyc.tsx` (Verification, KYC team's), `ConnectedApps.tsx`.
+- `apps/web/src/TestFunds.tsx`, `Kyc.tsx` (Verification, KYC team's), `ConnectedApps.tsx`,
+  `History.tsx` (added 11 Nov: deposits, sends and withdrawals, from Railgun's own history).
 - `apps/web/src/styles.css`: all styling. Colour tokens and dark mode live here.
 - The consent screen for other apps is server-rendered HTML in
   `apps/server/src/oidc/provider.ts` (the `page(...)` calls).
@@ -35,9 +36,9 @@ test in the same change and say so:
   `fee-reserve-empty`, `testfunds-status`, `tidepool-deposit-address`,
   `active-deposit-status`, `mainnet-price`, `unshield-status`,
   `withdraw-receives`, `withdraw-swap-receives`, `withdraw-receive-as`,
-  `withdraw-linked-warning`, `human-status`, `connected-apps`.
+  `withdraw-linked-warning`, `human-status`, `connected-apps`, `history`.
 - **Regions (a `section` with an `h2` via `aria-labelledby`):** Private balance,
-  Add money, Test funds, Send privately, Withdraw, Verification.
+  Add money, Test funds, Send privately, Withdraw, Verification, History.
 - **Headings:** "Sign up or sign in", "Your account", "Confirm it’s you",
   "Sign in to continue", "This sign-in link doesn’t work", "Sign-in did not complete".
 - **Buttons/links (exact names):** Continue, Verify, Sign in with passkey,
@@ -54,6 +55,7 @@ test in the same change and say so:
   balance labels, the error messages in `SendPrivately.tsx` and `AddMoney.tsx`.
 - **Trust labels that must stay visible:** "Testnet", "Sandbox (test mode)",
   "Unaudited", the public-address warnings on Withdraw and Add money,
+  History's "Only you see this…" note,
   "Tidepool sees the address…", "No app sees your email…". These are honesty
   commitments, not decoration.
 - Accessibility: keep `role="status"` / `role="alert"` on live messages, real

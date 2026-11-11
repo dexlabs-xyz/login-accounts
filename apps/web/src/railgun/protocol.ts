@@ -124,7 +124,31 @@ export type DepositMethod =
   | 'deposit.rescan'
   | 'fees'
   | 'send.quote'
-  | 'send.execute';
+  | 'send.execute'
+  | 'history';
+
+/**
+ * One line of the account's history, built in the wallet worker from Railgun's
+ * own transaction history (decrypted with this wallet's keys, on this device).
+ * Amounts in the token's smallest units. Never sent anywhere.
+ */
+export interface HistoryEntry {
+  /** Ethereum transaction hash. */
+  txid: string;
+  /** Unix seconds, when known. */
+  timestamp: number | null;
+  kind: 'deposit' | 'received' | 'sent' | 'withdrew' | 'other';
+  /**
+   * Money that came in: still in Railgun's privacy check, spendable (or already
+   * spent since), or blocked by sanctions screening. Null for money that went out.
+   */
+  status: 'checking' | 'spendable' | 'blocked' | null;
+  amounts: { tokenAddress: string; amount: string }[];
+  /** Withdrawals: Railgun's fee per token (amounts above are what arrived). */
+  fees?: { tokenAddress: string; amount: string }[];
+  /** Who it went to (0zk for a private send, 0x for a withdrawal), when known. */
+  to: string | null;
+}
 
 export type ToWorker =
   /** rootSecret is transferred (not copied): the page's copy is wiped by the transfer. */

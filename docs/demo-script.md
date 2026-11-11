@@ -53,6 +53,9 @@ clear; see the README's known limit). So prepare two accounts a day ahead:
 
 ## 5. Withdraw (60 s), as Alice
 
+- First wait until Alice's balance shows the send from section 4 (the
+  numbers change). Going too fast shows "Your last transaction is still being
+  confirmed…": just wait a minute and press Review again.
 - **Withdraw** → a fresh Rabby address → 10 USDT → Review: Railgun's 0.25%
   fee, the exact amount arriving, and the "This part is public" warning →
   passkey → arrives in Rabby.
@@ -72,6 +75,10 @@ clear; see the README's known limit). So prepare two accounts a day ahead:
   account that passed KYC (sandbox; "Skip the face check" works for demos).
 - Back on Login's account page: **Apps you've signed in to** lists the app
   and what it sees. *No app ever gets your email.*
+
+- Scroll to **History**: the deposits (the test-funds claim labelled as
+  such), the private send and both withdrawals, each with its status. *Only
+  Alice sees this: it's worked out in her browser from her own wallet.*
 
 ## Close (15 s)
 

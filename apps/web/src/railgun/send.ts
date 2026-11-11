@@ -86,7 +86,8 @@ export class SendError extends Error {
       | 'no-broadcaster'
       | 'fee-too-high'
       | 'quote-expired'
-      | 'broadcaster-refused',
+      | 'broadcaster-refused'
+      | 'still-confirming',
     cause?: unknown,
   ) {
     super(code, cause === undefined ? undefined : { cause });
@@ -175,6 +176,9 @@ export function createSender(ctx: SendContext) {
       const { gasEstimate } = await estimate().catch((e: unknown) => {
         // The SDK checks the fee balance itself during the estimate; give the page our error code.
         if (e instanceof Error && /too low to pay broadcaster fee/i.test(e.message)) throw new SendError('insufficient-fee-balance');
+        // Right after a send, the wallet may not have seen it confirm yet and picks a note that
+        // the send already spent; the chain refuses it (nothing is sent). Seen live 11 Nov 2026.
+        if (e instanceof Error && /note already spent/i.test(e.message)) throw new SendError('still-confirming', e);
         throw e;
       });
       async function estimate() {

@@ -3,6 +3,7 @@ import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
 import { KycCard, type KycStatus } from './Kyc.tsx';
 import { ConnectedApps } from './ConnectedApps.tsx';
+import { History } from './History.tsx';
 import { TestFunds } from './TestFunds.tsx';
 import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS } from './railgun/protocol.ts';
@@ -593,6 +594,7 @@ function Account({
       {me.hasVault && open && <PrivateBalance />}
       {me.hasVault && open && <SendPrivately confirmWithPasskey={confirmWithPasskey} />}
       {me.hasVault && open && <Withdraw confirmWithPasskey={confirmWithPasskey} />}
+      {me.hasVault && open && <History />}
       {me.hasVault && open && <TestFunds />}
       {me.hasVault && open && <AddMoney />}
 

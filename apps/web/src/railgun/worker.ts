@@ -21,6 +21,7 @@ import LevelJS from 'level-js';
 import {
   ArtifactStore,
   createRailgunWallet,
+  getWalletTransactionHistory,
   loadProvider,
   refreshBalances,
   refreshReceivePOIsForWallet,
@@ -36,7 +37,8 @@ import { createDeposits } from './deposits.ts';
 import { createSender } from './send.ts';
 import { getProver } from '@railgun-community/wallet';
 import { groth16 } from 'snarkjs';
-import type { FromWorker, ToWorker } from './protocol.ts';
+import type { FromWorker, HistoryEntry, ToWorker } from './protocol.ts';
+import { TransactionHistoryItemCategory, type TransactionHistoryItem } from '@railgun-community/shared-models';
 
 const NETWORK = NetworkName.EthereumSepolia;
 const CHAIN = NETWORK_CONFIG[NETWORK].chain;
@@ -111,6 +113,41 @@ const errorDetail = (err: unknown) => {
   }
   return [err.message, ...causes, err.stack ?? ''].join('\n').slice(0, 2000);
 };
+
+/**
+ * Railgun's history item, cut down to what the History card shows. Leaves out
+ * memos, change outputs and the relay's fee (paid from the hidden fee reserve).
+ */
+function toHistoryEntry(h: TransactionHistoryItem): HistoryEntry {
+  const pick = (list: { tokenAddress: string; amount: bigint }[]) =>
+    list.filter((a) => a.amount > 0n).map((a) => ({ tokenAddress: a.tokenAddress, amount: a.amount.toString() }));
+  const base = { txid: h.txid, timestamp: h.timestamp ?? null, status: null };
+  const incoming = (list: TransactionHistoryItem['receiveERC20Amounts']): HistoryEntry['status'] => {
+    const buckets = list.filter((a) => a.amount > 0n).map((a) => a.balanceBucket as string);
+    if (buckets.includes('ShieldBlocked')) return 'blocked';
+    return buckets.every((b) => b === 'Spendable' || b === 'Spent') ? 'spendable' : 'checking';
+  };
+  switch (h.category) {
+    case TransactionHistoryItemCategory.ShieldERC20s:
+      return { ...base, kind: 'deposit', amounts: pick(h.receiveERC20Amounts), to: null, status: incoming(h.receiveERC20Amounts) };
+    case TransactionHistoryItemCategory.TransferReceiveERC20s:
+      return { ...base, kind: 'received', amounts: pick(h.receiveERC20Amounts), to: null, status: incoming(h.receiveERC20Amounts) };
+    case TransactionHistoryItemCategory.TransferSendERC20s:
+      return { ...base, kind: 'sent', amounts: pick(h.transferERC20Amounts), to: h.transferERC20Amounts[0]?.recipientAddress ?? null };
+    case TransactionHistoryItemCategory.UnshieldERC20s:
+      return {
+        ...base,
+        kind: 'withdrew',
+        amounts: pick(h.unshieldERC20Amounts),
+        fees: h.unshieldERC20Amounts.filter((a) => a.unshieldFee).map((a) => ({ tokenAddress: a.tokenAddress, amount: a.unshieldFee! })),
+        to: h.unshieldERC20Amounts[0]?.recipientAddress ?? null,
+      };
+    default: {
+      const all = [...h.receiveERC20Amounts, ...h.transferERC20Amounts, ...h.unshieldERC20Amounts];
+      return { ...base, kind: 'other', amounts: pick(all), to: null };
+    }
+  }
+}
 
 // ---------- circuit artifacts, cached in IndexedDB (public files, not secret) ----------
 
@@ -269,7 +306,14 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
               return { shieldFeeBasisPoints, unshieldFeeBasisPoints };
             case 'send.quote':
               if (!sender) throw new Error('Wallet not open.');
-              return sender.quote(msg.params);
+              return await sender.quote(msg.params).catch((e: unknown) => {
+                // The last transaction hasn't shown up in this wallet yet: rescan, so the next Review works.
+                if (e instanceof Error && e.name === 'still-confirming' && walletId) void refreshBalances(CHAIN, [walletId]);
+                throw e;
+              });
+            case 'history':
+              if (!walletId) throw new Error('Wallet not open.');
+              return (await getWalletTransactionHistory(CHAIN, walletId, undefined)).map(toHistoryEntry);
             case 'send.execute': {
               if (!sender) throw new Error('Wallet not open.');
               const r = await sender.execute(msg.params);

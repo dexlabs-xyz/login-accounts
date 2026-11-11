@@ -31,6 +31,8 @@ const ERRORS: Record<string, string> = {
   'quote-expired': 'The fee quote expired. Review it again.',
   'broadcaster-refused':
     'The network relay couldn’t confirm the privacy check on your funds, so nothing was sent. Press Review again to use a different relay.',
+  'still-confirming':
+    'Your last transaction is still being confirmed, so its money can’t be used yet. Nothing was sent. Wait a minute, then press Review again.',
   'Wallet locked.': 'Your wallet locked. Unlock and try again.',
   'swap-mismatch': 'The swap quote didn’t match the withdrawal, so we stopped. Review it again.',
 };
