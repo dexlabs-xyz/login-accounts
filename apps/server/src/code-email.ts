@@ -7,6 +7,8 @@
  * falls back to the reader's own monospace font.
  */
 
+import { emailLogo } from './email-logo.ts';
+
 export interface CodeEmail {
   subject: string;
   /** Plain-text copy for email apps that can't show the design. */
@@ -31,7 +33,7 @@ export function codeEmail(code: string): CodeEmail {
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;margin:24px auto;border:1px solid #C7D7FE;border-radius:16px;border-collapse:separate;background:#FFFFFF;">
   <tr>
-    <td style="padding:32px 28px;${font}">
+    <td style="padding:28px 28px 32px;${font}">${emailLogo(font)}
       <h1 style="margin:0 0 12px 0;${font}font-size:28px;line-height:1.2;font-weight:600;letter-spacing:-0.02em;color:#0F172A;">Your Login code</h1>
       <p style="margin:0 0 20px 0;${font}font-size:16px;line-height:1.6;color:#475569;">Enter this code to continue. It expires in 10 minutes.</p>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#EFF4FF;border-radius:12px;border-collapse:separate;">
@@ -40,7 +42,7 @@ export function codeEmail(code: string): CodeEmail {
         </tr>
       </table>
       <p style="margin:20px 0 0 0;${font}font-size:14px;line-height:1.6;color:#475569;">If you didn’t ask for it, ignore this email. Login will never ask you for this code by phone, chat or email.</p>
-      <p style="margin:22px 0 0 0;${font}font-size:16px;line-height:1.5;color:#0F172A;">High fives,<br><span style="font-weight:600;color:#2563EB;">Team Login.</span></p>
+      <p style="margin:22px 0 0 0;${font}font-size:16px;line-height:1.5;color:#0F172A;">High fives,<br><span style="font-weight:600;color:#2563EB;">The Login team at Dexlabs</span></p>
     </td>
   </tr>
 </table>
@@ -54,7 +56,7 @@ export function codeEmail(code: string): CodeEmail {
 If you didn't ask for it, ignore this email. Login will never ask you for this code by phone, chat or email.
 
 High fives,
-Team Login.
+The Login team at Dexlabs
 `;
 
   return { subject: `${code} is your Login code`, text, html };

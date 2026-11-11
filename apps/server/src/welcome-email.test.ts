@@ -17,7 +17,7 @@ describe('welcome email', () => {
       'Sign in with one click',
       'One important note:',
       'Login will never ask for your password, recovery phrase or ID by email.',
-      'Team Login.',
+      'The Login team at Dexlabs',
     ]) {
       expect(w.html).toContain(part);
     }
