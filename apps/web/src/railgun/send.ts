@@ -179,6 +179,10 @@ export function createSender(ctx: SendContext) {
         // Right after a send, the wallet may not have seen it confirm yet and picks a note that
         // the send already spent; the chain refuses it (nothing is sent). Seen live 11 Nov 2026.
         if (e instanceof Error && /note already spent/i.test(e.message)) throw new SendError('still-confirming', e);
+        // Same family: the wallet's view of Railgun's merkle tree is behind the chain (e.g. right after a
+        // deposit lands). The SDK says "Invalid Merkle Root. Please sync your balances"; the worker rescans on
+        // still-confirming, so pressing Review again works. Seen live 12 Nov 2026.
+        if (e instanceof Error && /invalid merkle root/i.test(e.message)) throw new SendError('still-confirming', e);
         throw e;
       });
       async function estimate() {

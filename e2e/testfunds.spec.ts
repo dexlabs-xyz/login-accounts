@@ -4,7 +4,7 @@
  * long until it's spendable. Needs TESTNET_POOL_MNEMONIC in .env.
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, errorToast, signUp } from './helpers.ts';
+import { Device, disableAutofill, errorToast, signUp, toastWith } from './helpers.ts';
 import { log } from './live.ts';
 
 test.describe.configure({ timeout: 180 * 60_000 });
@@ -47,7 +47,7 @@ test('a new account claims 250 test USDT once; it becomes spendable', async ({ p
   await expect(funds.getByTestId('testfunds-privacy')).toContainText('We see your private address only this once');
   say('sent');
   await button.click(); // once only: the button stays, pressing it again says so
-  await expect(page.getByRole('status').filter({ hasText: 'You already claimed!' })).toBeVisible();
+  await expect(toastWith(page, 'You already claimed!')).toBeVisible();
 
   // Measure: how long until a received private transfer is spendable (decides how instant this feels).
   const t1 = Date.now();

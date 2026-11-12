@@ -125,7 +125,7 @@ test('Solana devnet: asks for a refund address, then gets a Solana deposit addre
 
   const refund = add.getByLabel(/Refund address/);
   await refund.fill('0x1111111111111111111111111111111111111111'); // an Ethereum address: refused
-  await expect(add.getByText('That isn’t a Solana address.')).toBeVisible();
+  await expect(refund).toHaveAttribute('aria-invalid', 'true'); // the redesign marks the field red, no text
   await expect(add.getByRole('button', { name: 'Get deposit address' })).toBeDisabled();
 
   // A throwaway Solana public key (32-byte ed25519, base58), testnet only.

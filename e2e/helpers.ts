@@ -128,6 +128,9 @@ export async function chooseSend(page: Page, where: 'Privately via Railgun' | 'T
 
 /** Errors are toasts now (Gold, 12 Nov): the latest one. */
 export const errorToast = (page: Page) => page.locator('[data-sonner-toast][data-type="error"]').last();
+/** Every error toast on screen, joined: older errors (an earlier refusal) can still be showing above the newest. */
+export const errorTexts = async (page: Page) =>
+  (await page.locator('[data-sonner-toast][data-type="error"]').allTextContents().catch(() => [] as string[])).join(' | ');
 /** Any toast (feedback, warnings, errors and status are all toasts), optionally the one containing `text`. */
 export const toastWith = (page: Page, text?: string | RegExp) =>
   text === undefined ? page.locator('[data-sonner-toast]') : page.locator('[data-sonner-toast]').filter({ hasText: text });

@@ -5,7 +5,7 @@
  * (deposit + privacy check + proofs). TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
-import { chooseSend, errorToast, spendableUsdt } from './helpers.ts';
+import { chooseSend, errorTexts, errorToast, spendableUsdt } from './helpers.ts';
 import { Contract, JsonRpcProvider, Wallet } from 'ethers';
 import { ERC20, fundedAccount, log, provider, watch } from './live.ts';
 
@@ -78,7 +78,7 @@ test('withdraws through NEAR Intents (default: USDC on Solana, then ETH on Sepol
         .toMatch(/^(alert: |Withdrew )/)
         .then(() => newError());
       if (!outcome) break;
-      const alert = (await errorToast(page).textContent()) ?? '';
+      const alert = await errorTexts(page);
       say(`attempt ${attempt}: ${alert}`);
       if (!/network relay couldn’t confirm/.test(alert) || attempt >= 4) throw new Error(`Withdrawal failed: ${alert}`);
     }

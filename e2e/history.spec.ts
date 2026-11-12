@@ -5,7 +5,7 @@
  */
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
-import { chooseSend, closeSheet, Device, disableAutofill, errorToast, goTo, openSheet, signUp } from './helpers.ts';
+import { chooseSend, closeSheet, Device, disableAutofill, errorTexts, goTo, openSheet, signUp } from './helpers.ts';
 import { fundedAccount, log, watch } from './live.ts';
 
 test.describe.configure({ timeout: 240 * 60_000 });
@@ -21,7 +21,7 @@ async function confirm(page: Page, panel: Locator, statusId: string, done: RegEx
       () => false,
     );
     if (ok) return;
-    const alert = (await errorToast(page).textContent().catch(() => '')) ?? '';
+    const alert = await errorTexts(page);
     say(`attempt ${attempt}: ${alert}`);
     if (!/network relay couldn’t confirm/.test(alert) || attempt >= 4) throw new Error(`Failed: ${alert}`);
   }
@@ -50,8 +50,14 @@ test('History lists the deposit, the private send and the withdrawal; the receiv
   // the balance shows the send (250 USDT no longer all spendable), then until fees are covered.
   await closeSheet(page);
   const card = page.getByRole('region', { name: /Private balance/ });
+  let lastLine = '';
   await expect
-    .poll(async () => (await page.keyboard.press('Shift'), (await card.getByTestId('balance-Spendable-usdt').textContent().catch(() => '')) ?? ''), {
+    .poll(async () => {
+      await page.keyboard.press('Shift');
+      const line = (await card.locator('.hero-status').allInnerTexts().catch(() => [] as string[])).join(' / ');
+      if (line !== lastLine) say(`balance: ${(lastLine = line)}`);
+      return (await card.getByTestId('balance-Spendable-usdt').textContent().catch(() => '')) ?? '';
+    }, {
       timeout: 30 * 60_000,
       intervals: [15_000],
     })
