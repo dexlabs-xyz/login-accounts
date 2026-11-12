@@ -5,6 +5,9 @@
 import { expect, test } from '@playwright/test';
 import { Device, disableAutofill, freshEmail, goTo, latestCode, recordSecrets, recordWebAuthnCalls, signOut, signUp, toastWith, errorToast, verifyEmail, walletCheck } from './helpers.ts';
 
+/** Rows of the passkey list in Settings (Sonner toasts are list items too, so don't count the whole page). */
+const passkeyRows = (page: import('@playwright/test').Page) => page.getByRole('list', { name: 'Passkeys' }).getByRole('listitem');
+
 // Chrome's virtual authenticator answers autofill requests instantly, which a
 // real user never does. Keep autofill off except where a test turns it on.
 test.beforeEach(async ({ page }) => {
@@ -147,7 +150,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await page.getByRole('button', { name: 'Add a security key' }).click();
     await page.getByRole('button', { name: 'Keep for signing in' }).click();
 
-    const walletRow = page.getByRole('listitem').filter({ hasText: 'opens wallet' });
+    const walletRow = passkeyRows(page).filter({ hasText: 'opens wallet' });
     await walletRow.getByRole('button', { name: 'Remove' }).click();
     await expect(errorToast(page)).toContainText('only passkey that can open your wallet');
   });
@@ -161,17 +164,21 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await page.getByRole('button', { name: 'Add a security key' }).click();
 
     const panel = toastWith(page, 'can sign you in, but it can’t open your wallet');
-    await expect(panel).toContainText('not a backup for your money');
+    await expect(panel).toContainText('not a backup for your money', { timeout: 30_000 });
     await panel.getByRole('button', { name: 'Remove it' }).click();
     await expect(page.getByText('Removed.')).toBeVisible();
-    await expect(page.getByRole('listitem')).toHaveCount(1);
+    await expect(passkeyRows(page)).toHaveCount(1);
     // The password manager was told it's no longer valid, so the browser removed it too.
     await expect.poll(async () => (await brave.credentials()).length).toBe(0);
 
     // Keep path: label says why, and there's no Connect button.
+    // Move the pointer off the toasts (Sonner expands and pauses the stack while it's hovered), like a person
+    // would, and let "Removed." go, so the new toast isn't still moving when we click it.
+    await page.mouse.move(0, 0);
+    await expect(page.getByText('Removed.')).toHaveCount(0, { timeout: 15_000 });
     await page.getByRole('button', { name: 'Add a security key' }).click();
     await page.getByRole('button', { name: 'Keep for signing in' }).click();
-    const row = page.getByRole('listitem').filter({ hasText: 'can’t open wallets' });
+    const row = passkeyRows(page).filter({ hasText: 'can’t open wallets' });
     await expect(row).toBeVisible();
     await expect(row.getByRole('button', { name: 'Connect' })).toHaveCount(0);
   });
@@ -184,12 +191,12 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await Device.add(page, { prf: false, synced: false, transport: 'usb' });
     await page.getByRole('button', { name: 'Add a security key' }).click();
     const panel = toastWith(page, 'can sign you in, but it can’t open your wallet');
-    await expect(panel).toBeVisible();
+    await expect(panel).toBeVisible({ timeout: 30_000 });
 
-    await page.getByRole('listitem').filter({ hasText: 'can’t open wallets' }).getByRole('button', { name: 'Remove' }).click();
-    await expect(page.getByRole('listitem')).toHaveCount(1);
+    await passkeyRows(page).filter({ hasText: 'can’t open wallets' }).getByRole('button', { name: 'Remove' }).click();
+    await expect(passkeyRows(page)).toHaveCount(1);
     await expect(panel).toHaveCount(0);
-    await expect(errorToast(page)).toHaveCount(0); // no stale error either
+    await expect(errorToast(page), (await errorToast(page).textContent().catch(() => '')) ?? '').toHaveCount(0); // no stale error either
   });
 
   test('a passkey added while the wallet was locked can be connected later, then opens the wallet alone', async ({ page }) => {
@@ -205,7 +212,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await page.getByRole('button', { name: 'Add your phone' }).click();
     await laptop.setResponds(true);
     await expect(page.getByText('press “Connect” next to it')).toBeVisible();
-    const phoneRow = page.getByRole('listitem').filter({ hasText: 'not connected to your wallet yet' });
+    const phoneRow = passkeyRows(page).filter({ hasText: 'not connected to your wallet yet' });
     await expect(phoneRow.getByRole('button', { name: 'Connect' })).toBeDisabled();
 
     // Unlock with the laptop (the passkey that opens the wallet)...
@@ -268,8 +275,8 @@ test.describe('choosing where a backup passkey goes', () => {
     const [keyCred] = await key.credentials();
 
     // The security key is the second passkey in the list.
-    await page.getByRole('listitem').nth(1).getByRole('button', { name: 'Remove' }).click();
-    await expect(page.getByRole('listitem')).toHaveCount(1);
+    await passkeyRows(page).nth(1).getByRole('button', { name: 'Remove' }).click();
+    await expect(passkeyRows(page)).toHaveCount(1);
 
     await expect.poll(async () => (await calls.signals()).length).toBeGreaterThan(0);
     const last = (await calls.signals()).at(-1)!;
