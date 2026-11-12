@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api.ts';
+import { useToastWhile } from './ui/toast.tsx';
 
 /**
  * The Sumsub SDK is third-party code, and this page also unlocks the wallet.
@@ -124,6 +125,7 @@ export function KycCard({ onStatus }: { onStatus?: (s: KycStatus) => void } = {}
   const [target, setTarget] = useState<Level | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useToastWhile(error, { id: 'kyc-error', kind: 'error' });
   const container = useRef<HTMLDivElement>(null);
   const sdk = useRef<{ destroy(): void } | null>(null);
   const [widget, setWidget] = useState<{ level: Level; token: string; polling: boolean; sdk: SnsWebSdk } | null>(null);
@@ -249,7 +251,6 @@ export function KycCard({ onStatus }: { onStatus?: (s: KycStatus) => void } = {}
       <section className="card" aria-labelledby="kyc-h">
         <h2 id="kyc-h">Verification</h2>
         <p className="muted">Loading…</p>
-        {error && <p className="error" role="alert">{error}</p>}
       </section>
     );
   }
@@ -381,7 +382,6 @@ export function KycCard({ onStatus }: { onStatus?: (s: KycStatus) => void } = {}
         </button>
       )}
 
-      {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
 }

@@ -4,7 +4,7 @@
  * long until it's spendable. Needs TESTNET_POOL_MNEMONIC in .env.
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, signUp } from './helpers.ts';
+import { Device, disableAutofill, errorToast, signUp } from './helpers.ts';
 import { log } from './live.ts';
 
 test.describe.configure({ timeout: 180 * 60_000 });
@@ -33,7 +33,7 @@ test('a new account claims 250 test USDT once; it becomes spendable', async ({ p
         if (await button.isEnabled().catch(() => false)) await button.click();
         await page.waitForTimeout(3_000);
         // Don't wait for an error that may never come (a successful claim shows none).
-        const alert = funds.getByRole('alert');
+        const alert = errorToast(page);
         const err = (await alert.isVisible()) ? ((await alert.textContent({ timeout: 1_000 }).catch(() => '')) ?? '') : '';
         if (err) say(`+${Math.round((Date.now() - t0) / 1000)}s claim refused: ${err}`);
         return funds.getByTestId('testfunds-status').isVisible();

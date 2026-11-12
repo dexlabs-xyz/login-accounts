@@ -128,6 +128,9 @@ export async function chooseSend(page: Page, where: 'Privately via Railgun' | 'T
 
 /** Errors are toasts now (Gold, 12 Nov): the latest one. */
 export const errorToast = (page: Page) => page.locator('[data-sonner-toast][data-type="error"]').last();
+/** Any toast (feedback, warnings, errors and status are all toasts), optionally the one containing `text`. */
+export const toastWith = (page: Page, text?: string | RegExp) =>
+  text === undefined ? page.locator('[data-sonner-toast]') : page.locator('[data-sonner-toast]').filter({ hasText: text });
 
 /** What the Home balance says is spendable now, in USDT (it stays readable behind a pop-up). */
 export async function spendableUsdt(page: Page): Promise<number> {

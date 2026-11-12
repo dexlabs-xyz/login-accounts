@@ -3,7 +3,7 @@
  * Progress and success fade after a few seconds; errors stay until closed. Sonner announces each one to
  * screen readers. The small useToast() API below is unchanged, so callers don't depend on Sonner itself.
  */
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useEffect, useRef } from 'react';
 import { Toaster, toast } from 'sonner';
 
 /**
@@ -23,15 +23,19 @@ export interface ToastInput {
   sticky?: boolean;
   /** Put on the message itself, for the browser tests (e.g. testfunds-status). */
   testId?: string;
+  /** A button on the toast (e.g. Retry sync). Pressing it also closes the toast. */
+  action?: { label: string; onClick: () => void };
+  /** A second, quieter button (e.g. Keep for signing in). */
+  cancel?: { label: string; onClick: () => void };
 }
 
 const FADE_AFTER_MS = 5000;
 
 const api = {
-  show({ text, description, kind = 'message', id, sticky, testId }: ToastInput) {
+  show({ text, description, kind = 'message', id, sticky, testId, action, cancel }: ToastInput) {
     const content = testId ? <span data-testid={testId}>{text}</span> : text;
-    const stays = sticky ?? (kind === 'error' || kind === 'loading');
-    const options = { id, description, duration: stays ? Infinity : FADE_AFTER_MS };
+    const stays = sticky ?? (kind === 'error' || kind === 'loading' || !!action);
+    const options = { id, description, action, cancel, duration: stays ? Infinity : FADE_AFTER_MS };
     const show = { message: toast.message, loading: toast.loading, info: toast.info, success: toast.success, warning: toast.warning, error: toast.error }[kind];
     show(content, options);
   },
@@ -46,6 +50,21 @@ export function useToast() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error('useToast outside ToastProvider');
   return ctx;
+}
+
+/**
+ * Feedback, warnings, errors and status are toasts, never lines on the page (Gold, 12 Nov: a message appearing must not
+ * move the layout). Shows `text` while it's set, replaces it when it changes, and closes it when it's cleared.
+ */
+export function useToastWhile(text: string | null | undefined, options: Omit<ToastInput, 'text'> & { id: string }) {
+  const toast = useToast();
+  const latest = useRef(options);
+  latest.current = options;
+  useEffect(() => {
+    if (text) toast.show({ ...latest.current, text });
+    else toast.dismiss(latest.current.id);
+  }, [text, toast]);
+  useEffect(() => () => toast.dismiss(latest.current.id), [toast]);
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {

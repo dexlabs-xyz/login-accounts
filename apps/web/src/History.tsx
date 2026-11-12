@@ -173,7 +173,7 @@ const longDate = (s: number | null) => (s ? new Date(s * 1000).toLocaleDateStrin
 /**
  * Activity rows (Figma: Home → Notifications card, and the Notifications page).
  * Keeps History's test ids (ul "history", li data-kind / data-status), each entry's
- * Etherscan link, the claim note, and the "Only you see this…" note.
+ * Etherscan link. (The claim note and the "Only you see this…" note were removed on Gold's call, 12 Nov.)
  */
 export function Activity({
   title,
@@ -297,13 +297,6 @@ export function Activity({
         <button type="button" className="panel-link panel-more" onClick={() => setAll(true)}>
           Show all {entries.length}
         </button>
-      )}
-      {!onViewAll && (
-        <p className="panel-note">
-          Only you see this. It’s worked out on this device from your wallet’s own data, and it’s hidden whenever your wallet is
-          locked. On Etherscan, a private send shows only that a Railgun transaction happened; deposits and withdrawals are public
-          there, as they always are.
-        </p>
       )}
     </section>
   );

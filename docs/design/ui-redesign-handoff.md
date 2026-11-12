@@ -50,16 +50,25 @@ test in the same change and say so:
   Select token (`withdraw-receive-as`), Enter amount; Review → Confirm with passkey; Sent → Withdraw/Send again.
   Each Send form stays mounted while you step around: scope to `[data-send-mode="private|evm|sol"]`.
   Errors are Sonner toasts (`[data-sonner-toast][data-type="error"]`), plus `aria-invalid` on the field.
+  Gold, 12 Nov: **all** feedback, warnings, errors and status are toasts, never lines on the page (they moved the
+  layout). That includes "You could lose access to your money" (sticky while it's true), the sign-in-only passkey choice
+  (a toast with Keep for signing in / Remove it), a stalled sync (toast with Retry sync), sign-up errors and KYC errors.
+  Use `useToastWhile(text, options)` from `ui/toast.tsx`. e2e helpers: `errorToast`, `toastWith(page, text)`.
+  Content that belongs to a screen stays on it: Syncing % next to the balance, Send/Receive steps and their review
+  warnings, the verification stages, the broken sign-in link page.
   Unfinished deposits sit at the top of Notifications (`li[data-kind="pending"]`, Resume / Finish).
   Test USDT is a button on Home. e2e helpers: `goTo`, `openSheet`, `closeSheet`, `chooseSend`, `errorToast`,
   `spendableUsdt`.
 - **Headings:** "Welcome" (was "Sign up or sign in"), "Home" (screen-reader only; was "Your account"),
-  "Check your email" (code step), "Notifications", "Verification", "Settings", "Confirm it’s you",
+  "Check your email" (code step), "Notifications", "Verification", "Settings" (Gold's Figma 451:7683: rows Profile
+  picture, Email, each passkey, Backup your passkey, Account; then Wallet, Apps you’ve signed into, About), "Confirm it’s you",
   "Sign in to continue", "This sign-in link doesn’t work", "Sign-in did not complete".
 - **Buttons/links (exact names):** Continue, Sign in with passkey, Go back, Resend code, Test USDT, Send, Receive,
   Copy address (the email code is sent on the sixth digit: there's no Verify button any more),
-  Unlock with passkey, Lock, Sign out, Add your phone, Add a security key,
-  Other options, Connect, Remove, Remove it, Keep for signing in, Retry sync,
+  Unlock with passkey, Sign out, Copy private address, Github,
+  (Gold, 12 Nov: Settings has no Lock, Other options or Confirm a test send any more; the tests lock by reloading the page,
+  and "Wallet check" is screen-reader-only text), Add your phone, Add a security key,
+  Connect, Remove, Remove it, Keep for signing in, Retry sync,
   Review, Back, Confirm with passkey, Withdraw again, Get deposit address,
   From an Ethereum wallet, From Solana, "Verify you’re human…",
   Allow and continue, Cancel and go back to the app, View on Sepolia Etherscan.
@@ -71,9 +80,9 @@ test in the same change and say so:
   balance labels, the error messages in `SendPrivately.tsx` and `AddMoney.tsx`.
 - **Trust labels that must stay visible:** "Testnet" (on the Send/Receive forms), "Sandbox (test mode)",
   "Unaudited", the public-address warnings on Withdraw and Add money,
-  History's "Only you see this…" note (Notifications page), the Test USDT privacy toast,
+  the Test USDT privacy toast,
   (Gold, 12 Nov: disclosures are well timed, not repeated; "Testnet build. Never use real funds." and the
-  claim note under each History row were removed on purpose)
+  claim note under each History row and History's "Only you see this…" note were removed on purpose)
   "Tidepool sees the address…", "No app sees your email…". These are honesty
   commitments, not decoration.
 - Accessibility: keep `role="status"` / `role="alert"` on live messages, real

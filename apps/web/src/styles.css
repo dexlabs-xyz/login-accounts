@@ -268,6 +268,11 @@ h3 { margin: 0.5rem 0 0; }
   display: flex; flex-direction: column; justify-content: flex-start; gap: 16px;
 }
 .page-title { font-size: 16px; font-weight: 500; line-height: 24px; margin: 4px 0 6px; letter-spacing: normal; display: flex; align-items: center; gap: 8px; }
+/* Figma 556:9226: the page title 20px Medium, 50px above the card (16 of it is the page's gap). */
+/* 7px down so its baseline lines up with Login(accts) in the sidebar (both measured: 54px); the card moves with it. */
+.page-title.is-section { font-size: 20px; line-height: 19.447px; margin: 7px 0 34px; }
+/* The Notifications page's card: the same row padding and spacing as Home's card, with no header row. */
+.activity:not(.is-card) .activity-list { padding-top: 24px; }
 .tag-sandbox { font-size: 10px; font-weight: 500; line-height: 14px; padding: 1px 6px; border-radius: 3px; color: #f97316; background: rgba(249, 115, 22, 0.15); }
 
 /* Private balance */
@@ -367,7 +372,15 @@ h3 { margin: 0.5rem 0 0; }
 
 /* Settings and Verification pages reuse the older cards until they're redesigned. */
 .app-main > .link { justify-self: start; }
-.app-main > .card, .app-main > .warning { max-width: 799px; }
+/* Verification and Settings follow the Notifications page (Gold, 12 Nov): full-width #171717 cards, radius 10, the same
+   inner padding as Notifications' card (24 top, 25 left, 14 right, 19 bottom), 16 between cards, 20px Medium card titles. */
+.app-main > .card { background: var(--card); border: none; border-radius: 10px; padding: 24px 14px 19px 25px; gap: 14px; }
+.app-main > .card > h2 { font-size: 20px; font-weight: 500; line-height: 19.447px; margin: 0 0 6px; }
+.app-main > .warning { border: none; border-radius: 10px; padding: 16px 14px 16px 25px; background: #431407; color: #fdba74; }
+/* The Verification page's title already says "Verification": the KYC card's own heading stays for screen readers only. */
+.app-main > .card > #kyc-h { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
+.tag-status { font-size: 10px; font-weight: 500; line-height: 14px; padding: 1px 6px; border-radius: 3px; color: var(--fg); background: rgba(255, 255, 255, 0.1); }
+.tag-status.is-ok { color: #49e63b; background: rgba(73, 230, 59, 0.12); }
 
 /* ---------- Pop-ups ---------- */
 /* A layer of its own (not the browser's top layer), under the toasts so pop-up toasts show over the blur. */
@@ -397,6 +410,21 @@ h3 { margin: 0.5rem 0 0; }
    They draw in currentColor, so following --fg is enough. */
 [data-sonner-toast] [data-icon] { color: var(--fg); }
 [data-sonner-toast] .sonner-loading-bar { background: var(--fg); }
+/* Toasts with buttons (Retry sync, Remove it / Keep for signing in): the text takes the full width and the buttons sit
+   on a line of their own under it, right-aligned, in the Settings button style. */
+[data-sonner-toast].login-toast:has([data-button]) { flex-wrap: wrap; row-gap: 12px; align-items: flex-start; }
+[data-sonner-toast].login-toast:has([data-button]) [data-content] { flex: 1 1 calc(100% - 32px); }
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-button] {
+  height: 28px; padding: 0 14px; border-radius: 5.75px; font-size: 13.417px; font-weight: 400; line-height: 18.636px;
+  border: 0.2px solid rgba(255, 255, 255, 0.5); background: none; color: var(--fg); cursor: pointer;
+}
+[data-sonner-toaster][data-sonner-theme='dark'] [data-sonner-toast].login-toast [data-cancel] { background: none; color: var(--fg); }
+[data-sonner-toaster][data-sonner-theme='dark'] [data-sonner-toast].login-toast [data-cancel]:hover { background: rgba(255, 255, 255, 0.06); }
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-action] { background: var(--fg); color: #080808; border-color: var(--fg); }
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-action]:hover { background: rgba(255, 255, 255, 0.85); }
+/* The first button pushes the pair to the right; 6px between them, as in Settings. */
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-button] { margin-left: 6px; }
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-content] + [data-button] { margin-left: auto; }
 
 /* ---------- Phones: top bar + bottom tabs instead of the sidebar ---------- */
 @media (max-width: 820px) {
@@ -517,3 +545,46 @@ h3 { margin: 0.5rem 0 0; }
 .sheet-progress p { font-size: 14px; line-height: 20px; max-width: 320px; }
 .sheet-progress .sheet-actions { width: 100%; margin-top: 8px; }
 .sheet-progress a.sheet-note { color: var(--fg); }
+
+/* Settings (Gold's Figma 451:7683, 12 Nov): full width like the other pages (Gold, 12 Nov); groups of 52px rows 3px apart, #171717, the group's outer corners
+   rounded 10; 23px side padding; 16px Regular. A group's heading is 16px Regular at 60% (Gold, 12 Nov), 18 above it.
+   Figma spaces the groups 39 apart (still so on phones). */
+.set-page { display: flex; flex-direction: column; gap: 39px; }
+/* The four groups share the leftover height equally, so About ends level with the bottom of the profile block in the
+   sidebar (34.3 from the window's bottom), as Home's cards do (Gold, 12 Nov). 16px is the least space between groups;
+   in a short window the page scrolls instead. */
+.app-main.is-settings { padding-bottom: 34.3px; }
+.app-main.is-settings .set-page { flex: 1 0 auto; justify-content: space-between; gap: 16px; }
+.set-section { display: grid; gap: 18px; }
+.set-section > h2 { margin: 0; padding-left: 23px; font-size: 16px; font-weight: 400; line-height: 19.447px; opacity: 0.6; }
+.set-group, .set-list { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.set-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-height: 52px; padding: 0 23px; background: var(--card); font-size: 16px; line-height: 19.447px;
+}
+.set-group > :first-child, .set-group > .set-list:first-child > :first-child { border-radius: 10px 10px 0 0; }
+.set-group > :last-child, .set-group > .set-list:last-child > :last-child { border-radius: 0 0 10px 10px; }
+.set-group > :only-child { border-radius: 10px; }
+.set-group > .set-list { border-radius: 0; }
+.set-value { text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-address { display: flex; align-items: center; gap: 5px; }
+.set-address .icon-btn { padding: 0; }
+.set-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.set-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; }
+/* Small buttons (Figma: 28 high, 0.2px white-50% border, radius 5.75, 13.417px text). Remove is 92 wide; Sign out is red. */
+.set-btn {
+  display: inline-grid; place-items: center; height: 28px; padding: 0 14px; border: 0.2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 5.75px; background: none; color: var(--fg); font-size: 13.417px; line-height: 18.636px; text-decoration: none;
+  white-space: nowrap; cursor: pointer; transition: background 0.15s ease;
+}
+.set-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+.set-btn:disabled { opacity: 0.4; cursor: default; }
+.set-btn.is-wide { width: 92px; padding: 0; }
+.set-btn.is-danger { border: 0.5px solid rgba(220, 38, 38, 0.5); color: #dc2626; }
+.set-btn.is-danger:hover:not(:disabled) { background: rgba(220, 38, 38, 0.1); }
+.set-row .is-danger-text { color: #dc2626; }
+.set-ok { color: #16a34a; } /* "Unlocked": green 16px text, no pill (Gold, 12 Nov) */
+@media (max-width: 820px) {
+  .set-row { flex-wrap: wrap; padding: 11px 16px; } .set-value { white-space: normal; text-align: left; }
+  .app-main.is-settings { padding-bottom: 24px; } .app-main.is-settings .set-page { justify-content: flex-start; gap: 39px; }
+}

@@ -9,7 +9,7 @@ import { Frame, useCopyAddress, useHideBalance, usePage, useUsdTotal } from './h
 import { BalanceChart } from './home/BalanceChart.tsx';
 import { CopyAddressButton } from './home/CopyButton.tsx';
 import { Modal } from './ui/Modal.tsx';
-import { ToastProvider } from './ui/toast.tsx';
+import { ToastProvider, useToastWhile } from './ui/toast.tsx';
 import { usd } from './money.ts';
 import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS } from './railgun/protocol.ts';
@@ -99,10 +99,16 @@ function outcomeNote(o: WalletOutcome): string | null {
 
 // ---------- app ----------
 
+
 export function App() {
   const path = location.pathname;
   if (path === '/dev/outbox') return <DevOutbox />;
-  if (path === '/signin') return <SignInHandoff />;
+  if (path === '/signin')
+    return (
+      <ToastProvider>
+        <SignInHandoff />
+      </ToastProvider>
+    );
   return (
     <ToastProvider>
       <Main />
@@ -159,6 +165,46 @@ const tokenAmount = (address: string, amount: string) => {
 /** How long a sync may show no progress before we say so and offer a retry. */
 const SYNC_STALL_MS = 45_000;
 
+/** True once a sync has shown no progress for a while (then a toast offers Retry sync). */
+function useSyncStall(): [boolean, () => void] {
+  const pw = usePrivateWallet();
+  const [stalled, setStalled] = useState(false);
+  // Any change in status or progress resets the stall timer.
+  useEffect(() => {
+    setStalled(false);
+    if (pw.status !== 'syncing') return;
+    const t = setTimeout(() => setStalled(true), SYNC_STALL_MS);
+    return () => clearTimeout(t);
+  }, [pw.status, pw.scanProgress]);
+  return [stalled, () => (setStalled(false), privateWallet.refresh())];
+}
+
+/** The private wallet's status as toasts (Gold, 12 Nov), on every page while the wallet is open. */
+function WalletStatusToasts() {
+  const pw = usePrivateWallet();
+  const [stalled, retrySync] = useSyncStall();
+  useToastWhile(pw.status === 'starting' ? 'Opening your private wallet…' : null, { id: 'wallet-opening', kind: 'loading' });
+  useToastWhile(pw.status === 'needs-poi' ? 'Balance not available yet.' : null, {
+    id: 'wallet-poi',
+    kind: 'warning',
+    sticky: true,
+    description: 'This test build has no Railgun Proof of Innocence node configured.',
+  });
+  useToastWhile(pw.status === 'syncing' && stalled ? 'Syncing is taking longer than usual.' : null, {
+    id: 'wallet-stalled',
+    kind: 'warning',
+    description: `Stuck at ${Math.round(pw.scanProgress * 100)}%. One of the networks your wallet reads from may be slow. Your funds aren’t affected.`,
+    action: { label: 'Retry sync', onClick: retrySync },
+  });
+  useToastWhile(pw.status === 'error' ? 'Couldn’t load your private balance. Reload the page and unlock to try again.' : null, {
+    id: 'wallet-error',
+    kind: 'error',
+    // Only the error's type name (e.g. TypeError), never its message: safe to show, and it tells us where to look.
+    description: pw.error ? `Error code: ${pw.error}` : undefined,
+  });
+  return null;
+}
+
 /**
  * Home's top block (Figma: Private balance, then Test USDT / Send / Receive / Copy address).
  * The big number is everything private; the small line under it says what's spendable now and
@@ -168,14 +214,6 @@ function PrivateBalance({ hidden, onSend, onReceive }: { hidden: boolean; onSend
   const pw = usePrivateWallet();
   const total = useUsdTotal();
   const { address } = useCopyAddress();
-  const [stalled, setStalled] = useState(false);
-  // Any change in status or progress resets the stall timer.
-  useEffect(() => {
-    setStalled(false);
-    if (pw.status !== 'syncing') return;
-    const t = setTimeout(() => setStalled(true), SYNC_STALL_MS);
-    return () => clearTimeout(t);
-  }, [pw.status, pw.scanProgress]);
   if (pw.status === 'off') return null;
   const isReserve = (a: string) => a.toLowerCase() === SEPOLIA_WETH.toLowerCase();
   const all = Object.entries(pw.balances)
@@ -201,25 +239,10 @@ function PrivateBalance({ hidden, onSend, onReceive }: { hidden: boolean; onSend
       <div className="hero-row">
         <p className="hero-amount">{total === null ? '—' : hidden ? '••••••' : usd(total, 6)}</p>
         <div className="hero-meta">
-          {pw.status === 'starting' && <p className="hero-status">Opening your private wallet…</p>}
-          {pw.status === 'needs-poi' && (
-            <p className="hero-status" role="status">
-              Balance not available yet: this test build has no Railgun Proof of Innocence node configured.
-            </p>
-          )}
-          {pw.status === 'syncing' && !stalled && (
+          {pw.status === 'syncing' && (
             <p className="hero-status hero-syncing" role="status">
               {Math.round(pw.scanProgress * 100)}% Syncing…
             </p>
-          )}
-          {pw.status === 'syncing' && stalled && (
-            <div className="hero-status" role="status">
-              Syncing is taking longer than usual (stuck at {Math.round(pw.scanProgress * 100)}%). One of the networks your wallet
-              reads from may be slow. Your funds aren’t affected.{' '}
-              <button className="link" onClick={() => (setStalled(false), privateWallet.refresh())}>
-                Retry sync
-              </button>
-            </div>
           )}
           {ready &&
             (rows.length === 0 ? (
@@ -253,13 +276,6 @@ function PrivateBalance({ hidden, onSend, onReceive }: { hidden: boolean; onSend
           )}
         </div>
       </div>
-      {pw.status === 'error' && (
-        <p className="error" role="alert">
-          Couldn’t load your private balance. Lock and unlock to try again.
-          {/* Only the error's type name (e.g. TypeError), never its message: safe to show, and it tells us where to look. */}
-          {pw.error && <span className="muted small"> (Error code: {pw.error})</span>}
-        </p>
-      )}
       <div className="hero-actions">
         <TestUsdtButton />
         <button type="button" className="hero-btn" onClick={onSend}>
@@ -551,6 +567,8 @@ function Join({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  useToastWhile(info, { id: 'join-info', kind: 'info' });
+  useToastWhile(error && !(quietError && codeState === 'wrong') ? error : null, { id: 'join-error', kind: 'error' });
   const check = useEmailCheck(email);
   const continueFaces = useFaceSwap(sending);
   const emailInput = useRef<HTMLInputElement>(null);
@@ -788,13 +806,9 @@ function Join({
       )}
       {/* Hangs below the centred content, so a message appearing never moves the form. */}
       <div className="welcome-messages">
-        {info && (
-          <p className="info" role="status">
-            {info}
-          </p>
-        )}
-        {error && (
-          <p className={quietError && codeState === 'wrong' ? 'visually-hidden' : 'error'} role="alert">
+        {/* A plain wrong code: the red boxes say it; the words are for screen readers only. Other messages are toasts. */}
+        {error && quietError && codeState === 'wrong' && (
+          <p className="visually-hidden" role="alert">
             {error}
           </p>
         )}
@@ -914,6 +928,7 @@ function Account({
 
   const run = async (fn: () => Promise<void>) => {
     setError('');
+    setNote(null);
     setBusy(true);
     try {
       await fn();
@@ -938,20 +953,34 @@ function Account({
     setResume((r) => ({ index, n: (r?.n ?? 0) + 1 }));
     setSheet('receive');
   });
-  const messages = (
-    <>
-      {note && (
-        <p className="info" role="status">
-          {note}
-        </p>
-      )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-    </>
-  );
+  useToastWhile(note, { id: 'account-note', kind: note?.startsWith('Done.') ? 'success' : 'info' });
+  useToastWhile(error, { id: 'account-error', kind: 'error' });
+  // D4: stays up while every passkey that opens the wallet lives on a single device.
+  useToastWhile(atRisk ? 'You could lose access to your money.' : null, {
+    id: 'at-risk',
+    kind: 'warning',
+    sticky: true,
+    description: `Your only passkey${relevant.length > 1 ? 's are' : ' is'} stored on a single device. If you lose it, nobody (including Login) can recover your wallet. Add a passkey on another device, such as your phone, that syncs with iCloud or Google.`,
+  });
+  // Only while that passkey still exists: it may have been removed from the list instead.
+  const signInOnlyLive = !!signInOnly && me.credentials.some((c) => c.id === signInOnly);
+  useToastWhile(signInOnlyLive ? 'This passkey can sign you in, but it can’t open your wallet.' : null, {
+    id: 'sign-in-only',
+    kind: 'warning',
+    description:
+      'Where it’s stored (for example, this browser’s own passkey storage) doesn’t support the feature Login uses to protect your wallet. So it is not a backup for your money.',
+    action: {
+      label: 'Remove it',
+      onClick: () =>
+        void run(async () => {
+          if (!signInOnly) return;
+          await removePasskey(me, signInOnly);
+          setSignInOnly(null);
+          setNote('Removed. Try adding one on your phone or with a security key instead.');
+        }),
+    },
+    cancel: { label: 'Keep for signing in', onClick: () => (setSignInOnly(null), setNote('Kept for signing in only.')) },
+  });
 
   return (
     <>
@@ -964,17 +993,11 @@ function Account({
       </Modal>
     {/* Outside the pages, so it keeps watching while you switch between them. */}
       {me.hasVault && open && <ClaimWatcher />}
+      {me.hasVault && open && <WalletStatusToasts />}
       <Frame page={page} go={go} email={me.email} hidden={hidden} onToggleHidden={toggleHidden}>
         {page === 'home' && (
           <>
             <h1 className="visually-hidden">Home</h1>
-            {atRisk && (
-              <section className="warning" role="alert">
-                <strong>You could lose access to your money.</strong> Your only passkey{relevant.length > 1 ? 's are' : ' is'}{' '}
-                stored on a single device. If you lose it, nobody (including Login) can recover your wallet. Add a passkey on
-                another device, such as your phone, that syncs with iCloud or Google.
-              </section>
-            )}
             {me.hasVault && open ? (
               <>
                 <PrivateBalance hidden={hidden} onSend={() => setSheet('send')} onReceive={() => setSheet('receive')} />
@@ -1004,13 +1027,12 @@ function Account({
                 )}
               </section>
             )}
-            {messages}
             </>
         )}
 
         {page === 'notifications' && (
           <>
-            <h1 className="page-title">Notifications</h1>
+            <h1 className="page-title is-section">Notifications</h1>
             {me.hasVault && open ? (
               <Activity title="Notifications" hideTitle limit={20} hidden={hidden} pending={pending} />
             ) : (
@@ -1023,193 +1045,185 @@ function Account({
 
         {page === 'verification' && (
           <>
-            <h1 className="page-title">
+            {/* Same title and spacing as Notifications; the status sits in the title row so the card keeps its place. */}
+            <h1 className="page-title is-section">
               Verification <span className="tag-sandbox">Sandbox</span>
+              {kyc && (
+                <span data-testid="human-status" className={`tag-status${kyc.verifiedHuman ? ' is-ok' : ''}`}>
+                  {kyc.verifiedHuman ? `Verified human${kyc.sandbox ? ' · test mode' : ''}` : 'Not verified'}
+                </span>
+              )}
             </h1>
-            {kyc && (
-              <p data-testid="human-status">
-                {kyc.verifiedHuman ? (
-                  <span className="badge ok">Verified human{kyc.sandbox ? ' · test mode' : ''}</span>
-                ) : (
-                  <>
-                    <span className="badge">Not verified</span>{' '}
-                    <a
-                      href="#kyc-h"
-                      className="small"
-                      onClick={(e) => (
-                        e.preventDefault(),
-                        document.getElementById('kyc-h')?.scrollIntoView({ behavior: 'smooth' })
-                      )}
-                    >
-                      Verify you’re human
-                    </a>
-                  </>
-                )}
-              </p>
-            )}
             <KycCard onStatus={setKyc} />
           </>
         )}
 
         {page === 'settings' && (
           <>
-            <h1 className="page-title">Settings</h1>
-            <section className="card" aria-labelledby="wallet-h">
-              <h2 id="wallet-h">Wallet</h2>
-              {!me.hasVault && (
-                <>
-                  <p>No wallet yet.</p>
-                  <button disabled={busy} onClick={() => run(async () => setNote(outcomeNote(await setUpWalletHere(me))))}>
-                    Set up wallet on this device
-                  </button>
-                </>
-              )}
-              {me.hasVault && open && (
-                <>
-                  <p>
-                    <span className="badge ok">Unlocked</span> Locks after 15 minutes idle or when you close the tab.
-                  </p>
-                  {fp && (
-                    <p className="muted small">
-                      Wallet check: <code>{fp}</code>. Every passkey should show the same value.
-                    </p>
-                  )}
-                  <div className="row">
-                    <button
+            {/* Gold's Figma (451:7683, 12 Nov): rows of label + value, grouped; only what's drawn there. Things it doesn't
+                draw appear only in the state that needs them (locked wallet, an unconnected passkey, the warnings). */}
+            <h1 className="page-title is-section">Settings</h1>
+            <div className="set-page">
+              <div className="set-group">
+                <div className="set-row">
+                  <span>Profile picture</span>
+                  <img className="set-avatar" src="/img/avatar.png" alt="" width={30} height={30} />
+                </div>
+                <div className="set-row">
+                  <span>Email</span>
+                  <span className="set-value">{me.email}</span>
+                </div>
+                <ul className="set-list" aria-label="Passkeys">
+                  {me.credentials.map((c) => (
+                    <PasskeyRow
+                      key={c.id}
+                      c={c}
+                      hasVault={me.hasVault}
                       disabled={busy}
-                      onClick={() =>
+                      walletOpen={open}
+                      onRemove={() => run(async () => removePasskey(me, c.id))}
+                      onConnect={() =>
                         run(async () => {
-                          const o = await unlock(me);
-                          setNote(
-                            o.kind === 'opened' ? 'Confirmed with your passkey. (Test only: nothing was sent.)' : outcomeNote(o),
-                          );
+                          const r = await connectPasskey(me, c.id);
+                          if (r === 'no-prf') setSignInOnly(c.id);
+                          else setNote(connectNote(r));
                         })
                       }
-                    >
-                      Confirm a test send
-                    </button>
-                    <button onClick={() => wallet.lock()}>Lock</button>
-                  </div>
-                </>
-              )}
-              {me.hasVault && !open && (
-                <>
-                  <p>
-                    <span className="badge">Locked</span>
-                  </p>
-                  <button
-                    className="primary"
-                    disabled={busy}
-                    onClick={() => run(async () => setNote(outcomeNote(await unlock(me))))}
-                  >
-                    Unlock with passkey
-                  </button>
-                </>
-              )}
-            </section>
-            {atRisk && (
-              <section className="warning" role="alert">
-                <strong>You could lose access to your money.</strong> Your only passkey{relevant.length > 1 ? 's are' : ' is'}{' '}
-                stored on a single device. If you lose it, nobody (including Login) can recover your wallet. Add a passkey on
-                another device, such as your phone, that syncs with iCloud or Google.
-              </section>
-            )}
-            <section className="card" aria-labelledby="pk-h">
-              <h2 id="pk-h">Passkeys</h2>
-              <ul className="passkeys">
-                {me.credentials.map((c) => (
-                  <PasskeyRow
-                    key={c.id}
-                    c={c}
-                    hasVault={me.hasVault}
-                    disabled={busy}
-                    walletOpen={open}
-                    onRemove={() => run(async () => removePasskey(me, c.id))}
-                    onConnect={() =>
-                      run(async () => {
-                        const r = await connectPasskey(me, c.id);
-                        if (r === 'no-prf') setSignInOnly(c.id);
-                        else setNote(connectNote(r));
-                      })
-                    }
-                  />
-                ))}
-              </ul>
-              <div className="add-passkey">
-                <p className="small">
-                  <strong>Add a backup passkey.</strong> Put it somewhere other than this device, so losing one doesn’t lock you
-                  out.
-                </p>
-                <div className="row">
-                  {(
-                    [
-                      ['phone', 'Add your phone', 'primary'],
-                      ['security-key', 'Add a security key', ''],
-                      ['any', 'Other options', 'link'],
-                    ] as [PasskeyPlace, string, string][]
-                  ).map(([place, label, cls]) => (
-                    <button
-                      key={place}
-                      className={cls}
-                      disabled={busy}
-                      onClick={() =>
-                        run(async () => {
-                          setSignInOnly(null);
-                          const r = await addPasskey(me, place);
-                          if (r.result === 'no-prf') setSignInOnly(r.credentialId);
-                          else setNote(connectNote(r.result));
-                        })
-                      }
-                    >
-                      {label}
-                    </button>
+                    />
                   ))}
+                </ul>
+                <div className="set-row">
+                  <span>Backup your passkey</span>
+                  <span className="set-actions">
+                    {(
+                      [
+                        ['phone', 'Add your phone'],
+                        ['security-key', 'Add a security key'],
+                      ] as [PasskeyPlace, string][]
+                    ).map(([place, label]) => (
+                      <button
+                        key={place}
+                        className="set-btn"
+                        disabled={busy}
+                        onClick={() =>
+                          run(async () => {
+                            setSignInOnly(null);
+                            const r = await addPasskey(me, place);
+                            if (r.result === 'no-prf') setSignInOnly(r.credentialId);
+                            else setNote(connectNote(r.result));
+                          })
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+                <div className="set-row">
+                  <span className="is-danger-text">Account</span>
+                  <button
+                    className="set-btn is-danger"
+                    onClick={async () => {
+                      wallet.lock();
+                      await api('POST', '/api/logout');
+                      await refresh();
+                    }}
+                  >
+                    Sign out
+                  </button>
                 </div>
               </div>
-              {me.hasVault && !open && <p className="muted small">Unlock your wallet first so a new passkey can open it too.</p>}
-            </section>
-            <ConnectedApps refreshKey={kyc ? String(kyc.verifiedHuman) : ''} />
-            {/* Only while that passkey still exists: it may have been removed from the list instead. */}
-            {signInOnly && me.credentials.some((c) => c.id === signInOnly) && (
-              <section className="warning" role="alert" aria-label="Sign-in only passkey">
-                <p>
-                  <strong>This passkey can sign you in, but it can’t open your wallet.</strong> The place it’s stored (for
-                  example, this browser’s own passkey storage) doesn’t support the feature Login uses to protect your wallet. So
-                  it is <strong>not a backup for your money</strong>.
-                </p>
-                <div className="row">
-                  <button onClick={() => (setSignInOnly(null), setNote('Kept for signing in only.'))}>Keep for signing in</button>
-                  <button
-                    className="danger"
-                    disabled={busy}
-                    onClick={() =>
-                      run(async () => {
-                        await removePasskey(me, signInOnly);
-                        setSignInOnly(null);
-                        setNote('Removed. Try adding one on your phone or with a security key instead.');
-                      })
-                    }
-                  >
-                    Remove it
-                  </button>
+              <WalletRows
+                me={me}
+                open={open}
+                busy={busy}
+                fp={fp}
+                onSetUp={() => run(async () => setNote(outcomeNote(await setUpWalletHere(me))))}
+                onUnlock={() => run(async () => setNote(outcomeNote(await unlock(me))))}
+              />
+              <ConnectedApps refreshKey={kyc ? String(kyc.verifiedHuman) : ''} />
+              <div className="set-group">
+                <div className="set-row">
+                  <span>About</span>
+                  <a className="set-btn" href={REPO_URL} target="_blank" rel="noreferrer">
+                    Github
+                  </a>
                 </div>
-              </section>
-            )}
-            {messages}
-            <button
-              className="link"
-              onClick={async () => {
-                wallet.lock();
-                await api('POST', '/api/logout');
-                await refresh();
-              }}
-            >
-              Sign out
-            </button>
+              </div>
+            </div>
           </>
         )}
       </Frame>
     </>
+  );
+}
+
+const REPO_URL = 'https://github.com/dexlabs-xyz/login-accounts';
+
+/** First 11 and last 14 characters, as in Gold's Figma ("0zk1qyk7s8g...y95vg2he4c24"). */
+const shortAddress = (a: string) => (a.length > 28 ? `${a.slice(0, 11)}...${a.slice(-14)}` : a);
+
+/** Settings › Wallet (Figma: Address with copy, Status, Network). */
+function WalletRows({
+  me,
+  open,
+  busy,
+  fp,
+  onSetUp,
+  onUnlock,
+}: {
+  me: Me;
+  open: boolean;
+  busy: boolean;
+  fp: string | null;
+  onSetUp: () => void;
+  onUnlock: () => void;
+}) {
+  const { address, copy } = useCopyAddress();
+  return (
+    <section className="set-section" aria-labelledby="wallet-h">
+      <h2 id="wallet-h">Wallet</h2>
+      <div className="set-group">
+        {open && address && (
+          <div className="set-row">
+            <span>Address</span>
+            <span className="set-value set-address">
+              <span title={address}>{shortAddress(address)}</span>
+              <button type="button" className="icon-btn" aria-label="Copy private address" onClick={copy}>
+                <img src="/img/copy.svg" alt="" width={20} height={20} />
+              </button>
+            </span>
+          </div>
+        )}
+        <div className="set-row">
+          <span>Status</span>
+          {!me.hasVault ? (
+            <button className="set-btn" disabled={busy} onClick={onSetUp}>
+              Set up wallet on this device
+            </button>
+          ) : open ? (
+            <span className="set-value set-ok">Unlocked</span>
+          ) : (
+            <span className="set-actions">
+              <span>Locked</span>
+              <button className="set-btn" disabled={busy} onClick={onUnlock}>
+                Unlock with passkey
+              </button>
+            </span>
+          )}
+        </div>
+        <div className="set-row">
+          <span>Network</span>
+          <span className="set-value">Sepolia testnet</span>
+        </div>
+      </div>
+      {/* Not drawn: the browser tests read it to check that every passkey opens the same wallet. */}
+      {open && fp && (
+        <p className="visually-hidden">
+          Wallet check: <code>{fp}</code>
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -1228,39 +1242,32 @@ function PasskeyRow({
   onRemove: () => void;
   onConnect: () => void;
 }) {
+  // Figma draws the usual case: the passkey's type and Remove. Anything unusual about it is said next to the type.
   const walletStatus = !hasVault
     ? null
     : c.canOpenWallet
-      ? 'opens wallet'
+      ? null
       : c.prfSupported === false
         ? 'sign-in only: where it’s stored can’t open wallets'
         : 'not connected to your wallet yet';
   const canConnect = hasVault && !c.canOpenWallet && c.prfSupported !== false;
   return (
-    <li>
-      <div>
-        <strong>{c.backedUp ? 'Synced passkey' : 'Device-only passkey'}</strong>
-        <span className="muted small">
-          {' '}
-          · {c.backedUp ? 'backed up by your password manager' : 'lost if this device is lost'}
-          {walletStatus && ` · ${walletStatus}`}
-        </span>
-        <div className="muted small">
-          Added {new Date(c.createdAt).toLocaleString()}
-          {c.lastUsedAt ? ` · last used ${new Date(c.lastUsedAt).toLocaleString()}` : ''}
-        </div>
-        {canConnect && !walletOpen && <div className="muted small">Unlock your wallet to connect it.</div>}
-      </div>
-      <div className="row">
+    <li className="set-row">
+      <span>
+        {c.backedUp ? 'Synced passkey' : 'Device-only passkey'}
+        {walletStatus && <span className="muted small"> · {walletStatus}</span>}
+        {hasVault && c.canOpenWallet && <span className="visually-hidden"> · opens wallet</span>}
+      </span>
+      <span className="set-actions">
         {canConnect && (
-          <button className="link" disabled={disabled || !walletOpen} onClick={onConnect}>
+          <button className="set-btn" disabled={disabled || !walletOpen} onClick={onConnect}>
             Connect
           </button>
         )}
-        <button className="link danger" disabled={disabled} onClick={onRemove}>
+        <button className="set-btn is-wide" disabled={disabled} onClick={onRemove}>
           Remove
         </button>
-      </div>
+      </span>
     </li>
   );
 }

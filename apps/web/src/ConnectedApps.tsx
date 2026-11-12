@@ -24,26 +24,27 @@ export function ConnectedApps({ refreshKey }: { refreshKey: string }) {
     };
   }, [refreshKey]);
 
+  // Gold's Figma (Settings, 12 Nov): a heading and one row per app; the row says what that app sees.
   return (
-    <section className="card" aria-labelledby="apps-h">
-      <h2 id="apps-h">Apps you’ve signed in to</h2>
-      {failed && <p className="muted">Couldn’t load this list. Reload the page to try again.</p>}
-      {!failed && !data && <p className="muted">Loading…</p>}
-      {data && data.apps.length === 0 && (
-        <p className="muted">None yet. When you use “Continue with Login” on another app, it shows up here with what it can see.</p>
-      )}
-      {data && data.apps.length > 0 && (
-        <>
-          <ul className="connected-apps" data-testid="connected-apps">
-            {data.apps.map((a, i) => (
-              <li key={i}>
-                <strong>{a.name}</strong> sees: an ID that only this app gets
-                {data.verifiedHuman ? <>, and that you’re a verified human{data.sandbox ? ' (test mode)' : ''}</> : null}.
-              </li>
-            ))}
-          </ul>
-          <p className="muted small">No app sees your email, name, wallet or identity documents.</p>
-        </>
+    <section className="set-section" aria-labelledby="apps-h">
+      <h2 id="apps-h">Apps you’ve signed into</h2>
+      {data && data.apps.length > 0 ? (
+        <ul className="set-group" data-testid="connected-apps">
+          {data.apps.map((a, i) => (
+            <li key={i} className="set-row">
+              <span>{a.name}</span>
+              <span className="set-value muted">
+                Sees an ID only it gets{data.verifiedHuman ? <>, and that you’re a verified human{data.sandbox ? ' (test mode)' : ''}</> : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="set-group">
+          <div className="set-row">
+            <span>{failed ? 'Couldn’t load this list. Reload the page to try again.' : data ? 'None yet.' : 'Loading…'}</span>
+          </div>
+        </div>
       )}
     </section>
   );
