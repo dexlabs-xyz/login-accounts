@@ -8,6 +8,47 @@ chains, built on **NEAR Intents** and **Railgun**.
 - **Live demo:** https://demo.withlogin.com (Sepolia testnet)
 - **Design decisions:** [docs/design/passkeys.md](docs/design/passkeys.md)
 
+<!-- TODO(Gold): the one-paragraph concept explanation goes here, from Gold's write-up. -->
+
+## Try it in 5 minutes
+
+Use a desktop browser with a passkey option (Chrome, Safari or Edge; a phone
+works as the passkey). Each step says what you should see.
+
+1. **Open https://demo.withlogin.com, enter your email, then the 6-digit code.**
+   → The code is checked as soon as you type the sixth digit. You're asked to
+   create a passkey.
+2. **Create the passkey** (Face ID, Touch ID, a phone or a security key).
+   → You land on **Home** with a `0zk…` private address and a $0.00 private
+   balance. The wallet syncs for up to a minute the first time.
+3. **Press Test USDT.**
+   → A message says *"Sent $250 to your private balance"*, and a second one
+   says the server saw your private address for that claim only. The balance
+   shows 250 USDT *being checked* (Railgun's privacy check: a few minutes to
+   about two hours on Sepolia).
+4. **Open Notifications.**
+   → The claim is listed with its status and an Etherscan link. On Etherscan,
+   the deposit is public, as deposits always are.
+5. **In a second browser profile, sign up again and copy that account's
+   address (Copy address).** In the first account, once the balance is
+   spendable, press **Send** → *Send privately* → paste the address → 1 USDT →
+   **Review** → **Confirm with passkey**.
+   → *"Sent …"*. The second account's Notifications shows *"Received 1 USDT
+   privately"*. On Etherscan, the transaction shows only that a Railgun
+   transaction happened: no amount, sender or recipient.
+6. **Send → Withdraw**, to any `0x` address, as USDT or as another token or
+   chain (for example USDC on Solana devnet).
+   → The review lists every fee and warns that a withdrawal is public. After
+   confirming: *"Withdrew …"*.
+7. **Verification → Verify you're human** (Sumsub sandbox, test mode).
+   → Status becomes *Verified human*. Then sign in to the demo app with
+   **Continue with Login**: <!-- TODO(Gold): demo app URL -->
+   the consent screen says exactly what the app will see (an ID only that app
+   gets, and whether you're a verified human), never your email.
+
+Each account can make one send or withdrawal per deposit (see *Known limit*
+below), so a new account can try one of step 5 or step 6 after the test funds.
+
 ## What you can do
 
 1. **Sign up with a passkey.** Email + 6-digit code, then a passkey (Face ID,
@@ -29,7 +70,7 @@ chains, built on **NEAR Intents** and **Railgun**.
    swap can't be done, the USDT comes back to your private balance.
 6. **Verify you're human** (optional, Sumsub sandbox), and **continue with
    Login** on other apps: they learn only that you're a verified human, with a
-   different ID per app. Never your email. The account page lists each app
+   different ID per app. Never your email. Login lists each app
    you've signed in to and what it sees. Two steps are offered: *verified
    human* (a selfie video) and *verified identity* (an ID document).
 
@@ -96,6 +137,52 @@ Also worth knowing:
   can reach you without being able to link you across sites.
 - **Verified address** (proof of address), once dexlabs is verified at Sumsub.
 - **Solana deposits of any amount** (today you pick the exact amount first).
+
+## Hackathon notes
+
+- **Why Tidepool, not NEAR Intents mainnet:** NEAR Intents has no official
+  testnet, and this build never touches real funds. Swaps go through
+  [Tidepool](https://www.usetidepool.tech), a community-run NEAR Intents
+  testnet that speaks the same 1Click API. To show real prices, Add money also
+  fetches read-only `dry` quotes from mainnet 1Click with a placeholder
+  address: nothing can be sent.
+- **Tidepool's limits:** 0.006 ETH and 0.005 SOL per swap. Larger ETH
+  deposits are split into several swaps; larger SOL amounts are refused.
+- **Testnet only:** Ethereum Sepolia, Base Sepolia, Arbitrum Sepolia and
+  Solana devnet. Sumsub runs in sandbox mode.
+- **Team:** <!-- TODO(Gold): names and roles -->
+- **Other projects:** <!-- TODO(Gold): other hackathon projects by this team, or "None." -->
+- **License:** [Apache 2.0](LICENSE).
+
+## Built with
+
+| Library | Used for |
+|---|---|
+| [Railgun](https://github.com/Railgun-Community) (`@railgun-community/wallet`, `engine`, `shared-models`, `waku-broadcaster-client-web`) | Private balance, private sends and withdrawals, broadcasters |
+| [snarkjs](https://github.com/iden3/snarkjs) | Railgun's zero-knowledge proofs, generated in the browser |
+| [SimpleWebAuthn](https://simplewebauthn.dev) (`browser`, `server`) | Passkeys (WebAuthn, including the PRF extension) |
+| [ethers](https://ethers.org) | Ethereum Sepolia reads and transactions |
+| [oidc-provider](https://github.com/panva/node-oidc-provider), [openid-client](https://github.com/panva/openid-client) | "Continue with Login" (OpenID Connect) and its demo app |
+| [Hono](https://hono.dev) | Login's API server |
+| [Sumsub WebSDK](https://docs.sumsub.com) | KYC, sandbox mode |
+| [React](https://react.dev), [Vite](https://vite.dev), [Motion](https://motion.dev), [Sonner](https://sonner.emilkowal.ski) | The app, animations, notifications |
+| [level-js](https://github.com/Level/level-js), memdown | Railgun's local database |
+| [Vitest](https://vitest.dev), [Playwright](https://playwright.dev) | Unit and browser tests |
+
+The vault (`packages/vault`) uses only the browser's built-in Web Crypto: no
+homemade cryptography. Swaps use NEAR Intents' 1Click API (through Tidepool on
+testnet).
+
+## AI-written code
+
+Most of the code, tests and docs in this repository were written by AI coding
+agents (Claude Code, by Anthropic), directed and reviewed by the team. The
+team made the product and privacy decisions (recorded in
+[docs/design/passkeys.md](docs/design/passkeys.md)), designed the interface in
+Figma, and reviewed and merged every change. Security-sensitive parts (key
+handling, the privacy rule) are covered by browser tests that check no secret
+leaves the device.
+<!-- TODO(Gold): confirm this wording, and add any parts written by hand. -->
 
 ## Run it locally
 
