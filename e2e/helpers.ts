@@ -105,14 +105,40 @@ export async function goTo(page: Page, name: 'Home' | 'Notifications' | 'Verific
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name, exact: true }).click();
 }
 
-/** Home's Send / Receive pop-ups (they hold the Send privately, Withdraw and Add money forms). */
+/** Home's Send / Receive pop-ups. */
 export async function openSheet(page: Page, name: 'Send' | 'Receive') {
   await goTo(page, 'Home');
   await page.getByRole('button', { name, exact: true }).click();
   return page.getByRole('dialog', { name });
 }
+/**
+ * The Send pop-up's options: a private send, or out to an Ethereum or Solana address (a withdrawal).
+ * Steps back to the options first if the pop-up is already on another screen.
+ */
+export async function chooseSend(page: Page, where: 'Privately via Railgun' | 'To an Ethereum address' | 'To a Solana address') {
+  const dlg = page.getByRole('dialog', { name: 'Send' });
+  if (!(await dlg.isVisible())) await openSheet(page, 'Send');
+  const row = dlg.getByRole('button', { name: where });
+  while (!(await row.isVisible())) await dlg.getByRole('button', { name: 'Previous step' }).click();
+  await row.click();
+  // Each form stays mounted (hidden) while you step around: return the one just opened.
+  const mode = { 'Privately via Railgun': 'private', 'To an Ethereum address': 'evm', 'To a Solana address': 'sol' }[where];
+  return dlg.locator(`[data-send-mode="${mode}"]`);
+}
+
+/** Errors are toasts now (Gold, 12 Nov): the latest one. */
+export const errorToast = (page: Page) => page.locator('[data-sonner-toast][data-type="error"]').last();
+
+/** What the Home balance says is spendable now, in USDT (it stays readable behind a pop-up). */
+export async function spendableUsdt(page: Page): Promise<number> {
+  const t = (await page.getByTestId('balance-Spendable-usdt').textContent({ timeout: 1_000 }).catch(() => '')) ?? '';
+  return Number(/\$?([\d,.]+)/.exec(t)?.[1]?.replace(/,/g, '') ?? 0);
+}
+
+/** Esc closes any pop-up (the redesigned ones, like Receive, have no × button). */
 export async function closeSheet(page: Page) {
-  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 }
 
 export async function walletCheck(page: Page): Promise<string> {

@@ -66,8 +66,8 @@ export async function fundedAccount(page: Page, say: (m: string) => void) {
   await expect.poll(async () => (await provider.getBalance(funder.address)) >= parseEther('0.0035'), { timeout: 180_000, intervals: [5_000] }).toBe(true);
 
   await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Ethereum Sepolia' }).click();
   const depositTo = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
   // The public RPC sometimes fails gas estimation on a plain transfer (seen 9 Nov 2026): retry.
   for (let attempt = 1; ; attempt++) {

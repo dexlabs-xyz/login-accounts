@@ -57,8 +57,8 @@ test('EVM: ETH and USDC sent to one address → swapped through Tidepool → pri
 
   // Add money → From an Ethereum wallet: one address, no token or amount to pick.
   await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Ethereum Sepolia' }).click();
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
   expect(to).toMatch(/^0x[0-9a-fA-F]{40}$/);
   await expect(add.getByText('Only these three tokens')).toBeVisible();
@@ -102,8 +102,8 @@ test('EVM: USDT sent to the address goes straight in, no swap', async ({ page })
   await expect.poll(async () => ((await usdt.balanceOf!(sender.address)) as bigint) >= parseUnits('2', 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
 
   await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Ethereum Sepolia' }).click();
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
   const tx = await usdt.transfer!(to, parseUnits('2', 6));
   await tx.wait(1);
@@ -118,12 +118,12 @@ test('Solana devnet: asks for a refund address, then gets a Solana deposit addre
   await Device.add(page);
   await signUp(page);
   await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From Solana' }).click({ timeout: 240_000 });
-  await add.getByLabel('Send from').selectOption({ label: 'USDC on Solana devnet' }, { timeout: 60_000 });
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Solana', exact: true }).click({ timeout: 240_000 });
+  await add.getByLabel('Select token').selectOption({ label: 'USDC on Solana devnet' }, { timeout: 60_000 });
   await add.getByLabel('Amount').fill('1');
 
-  const refund = add.getByLabel(/Your Solana address/);
+  const refund = add.getByLabel(/Refund address/);
   await refund.fill('0x1111111111111111111111111111111111111111'); // an Ethereum address: refused
   await expect(add.getByText('That isn’t a Solana address.')).toBeVisible();
   await expect(add.getByRole('button', { name: 'Get deposit address' })).toBeDisabled();
@@ -154,8 +154,8 @@ test('EVM: more ETH than Tidepool takes in one swap (0.006) is split into severa
   }
 
   await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Ethereum Sepolia' }).click();
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
 
   // 3 x 0.0039 = 0.0117 ETH. After 0.001 gas and a 0.001 fee reserve, ~0.0097 is swapped: 0.006 + ~0.0037.

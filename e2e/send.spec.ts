@@ -3,7 +3,7 @@
  * broadcaster. Slow (deposit + privacy checks + proof). TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, openSheet, signUp } from './helpers.ts';
+import { chooseSend, Device, disableAutofill, signUp } from './helpers.ts';
 import { fundedAccount, log, watch } from './live.ts';
 
 test.describe.configure({ timeout: 180 * 60_000 });
@@ -24,12 +24,11 @@ test('A sends USDT privately to B through a broadcaster', async ({ page, browser
   expect(addressB).toMatch(/^0zk/);
 
   // --- A sends 0.5 USDT to B: review shows the fee, confirm with passkey, proof, broadcaster.
-  await openSheet(page, 'Send');
-  const send = page.getByRole('region', { name: /Send privately/ });
-  await send.getByLabel('To (private 0zk address)').fill(addressB);
-  await send.getByLabel('Amount (USDT)').fill('0.5');
+  const send = await chooseSend(page, 'Privately via Railgun');
+  await send.getByLabel('0zk address').fill(addressB);
+  await send.getByLabel('Enter amount').fill('0.5');
   await send.getByRole('button', { name: 'Review' }).click();
-  await expect(send.getByText(/Network fee: (less than|about|covered)/)).toBeVisible({ timeout: 120_000 });
+  await expect(send.getByText('Network fee')).toBeVisible({ timeout: 120_000 });
   say(`review: ${(await send.innerText()).replace(/\n+/g, ' | ').slice(0, 300)}`);
   await send.getByRole('button', { name: 'Confirm with passkey' }).click();
   await watch(page, 'transfer-status', /^Sent /, 10 * 60_000, say);

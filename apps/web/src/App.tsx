@@ -14,7 +14,8 @@ import { usd } from './money.ts';
 import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS } from './railgun/protocol.ts';
 import { AddMoney } from './deposits/AddMoney.tsx';
-import { SendPrivately, Withdraw } from './send/SendPrivately.tsx';
+import { usePendingDeposits } from './deposits/pending.ts';
+import { SendSheet } from './send/SendSheet.tsx';
 import { formatUnits } from './deposits/tidepool.ts';
 import {
   addPasskey,
@@ -931,6 +932,12 @@ function Account({
   const [page, go] = usePage();
   const [hidden, toggleHidden] = useHideBalance();
   const [sheet, setSheet] = useState<'send' | 'receive' | null>(null);
+  // Unfinished deposits stay in Notifications; "Resume" reopens the Receive pop-up at that deposit's address.
+  const [resume, setResume] = useState<{ index: number; n: number } | null>(null);
+  const pending = usePendingDeposits((index) => {
+    setResume((r) => ({ index, n: (r?.n ?? 0) + 1 }));
+    setSheet('receive');
+  });
   const messages = (
     <>
       {note && (
@@ -948,7 +955,14 @@ function Account({
 
   return (
     <>
-      {/* Outside the pages, so it keeps watching while you switch between them. */}
+      {/* Outside the pages (so Notifications can reopen Receive, and they keep their state). Send still holds today's forms. */}
+      <Modal open={sheet === 'send'} title="Send" onClose={() => setSheet(null)} bare>
+        <SendSheet confirmWithPasskey={confirmWithPasskey} onClose={() => setSheet(null)} />
+      </Modal>
+      <Modal open={sheet === 'receive'} title="Receive" onClose={() => setSheet(null)} bare>
+        <AddMoney resume={resume} />
+      </Modal>
+    {/* Outside the pages, so it keeps watching while you switch between them. */}
       {me.hasVault && open && <ClaimWatcher />}
       <Frame page={page} go={go} email={me.email} hidden={hidden} onToggleHidden={toggleHidden}>
         {page === 'home' && (
@@ -965,7 +979,7 @@ function Account({
               <>
                 <PrivateBalance hidden={hidden} onSend={() => setSheet('send')} onReceive={() => setSheet('receive')} />
                 <BalanceChart />
-                <Activity title="Notifications" card limit={4} hidden={hidden} onViewAll={() => go('notifications')} />
+                <Activity title="Notifications" card limit={4} hidden={hidden} onViewAll={() => go('notifications')} pending={pending} />
               </>
             ) : (
               <section className="panel locked" aria-labelledby="locked-h">
@@ -991,22 +1005,14 @@ function Account({
               </section>
             )}
             {messages}
-            {/* Today's forms, until the Send and Receive pop-ups from Figma are built (next round). */}
-            <Modal open={sheet === 'send'} title="Send" onClose={() => setSheet(null)} wide>
-              <SendPrivately confirmWithPasskey={confirmWithPasskey} />
-              <Withdraw confirmWithPasskey={confirmWithPasskey} />
-            </Modal>
-            <Modal open={sheet === 'receive'} title="Receive" onClose={() => setSheet(null)} wide>
-              <AddMoney />
-            </Modal>
-          </>
+            </>
         )}
 
         {page === 'notifications' && (
           <>
             <h1 className="page-title">Notifications</h1>
             {me.hasVault && open ? (
-              <Activity title="Notifications" hideTitle limit={20} hidden={hidden} />
+              <Activity title="Notifications" hideTitle limit={20} hidden={hidden} pending={pending} />
             ) : (
               <p className="muted">
                 Unlock your wallet on Home to see your activity. It’s worked out on this device and hidden while locked.

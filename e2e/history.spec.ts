@@ -5,7 +5,7 @@
  */
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
-import { closeSheet, Device, disableAutofill, goTo, openSheet, signUp } from './helpers.ts';
+import { chooseSend, closeSheet, Device, disableAutofill, errorToast, goTo, openSheet, signUp } from './helpers.ts';
 import { fundedAccount, log, watch } from './live.ts';
 
 test.describe.configure({ timeout: 240 * 60_000 });
@@ -21,7 +21,7 @@ async function confirm(page: Page, panel: Locator, statusId: string, done: RegEx
       () => false,
     );
     if (ok) return;
-    const alert = (await panel.getByRole('alert').textContent().catch(() => '')) ?? '';
+    const alert = (await errorToast(page).textContent().catch(() => '')) ?? '';
     say(`attempt ${attempt}: ${alert}`);
     if (!/network relay couldn’t confirm/.test(alert) || attempt >= 4) throw new Error(`Failed: ${alert}`);
   }
@@ -40,10 +40,9 @@ test('History lists the deposit, the private send and the withdrawal; the receiv
   const addressB = (await pageB.getByRole('region', { name: /Private balance/ }).locator('code.address').getAttribute('title', { timeout: 120_000 }))!;
 
   const spendableBefore = (await page.getByRole('region', { name: /Private balance/ }).getByTestId('balance-Spendable-usdt').textContent()) ?? '';
-  await openSheet(page, 'Send');
-  const send = page.getByRole('region', { name: /Send privately/ });
-  await send.getByLabel('To (private 0zk address)').fill(addressB);
-  await send.getByLabel('Amount (USDT)').fill('0.5');
+  const send = await chooseSend(page, 'Privately via Railgun');
+  await send.getByLabel('0zk address').fill(addressB);
+  await send.getByLabel('Enter amount').fill('0.5');
   await confirm(page, send, 'transfer-status', /^Sent /);
   say('sent 0.5 USDT to B');
 
@@ -58,11 +57,10 @@ test('History lists the deposit, the private send and the withdrawal; the receiv
     })
     .not.toBe(spendableBefore);
   await expect.poll(async () => (await page.keyboard.press('Shift'), page.getByTestId('fee-reserve-ready').isVisible()), { timeout: 30 * 60_000, intervals: [15_000] }).toBe(true);
-  await openSheet(page, 'Send');
-  const withdraw = page.getByRole('region', { name: /^Withdraw/ });
+  const withdraw = await chooseSend(page, 'To an Ethereum address');
   const to = Wallet.createRandom().address; // throwaway, testnet only
-  await withdraw.getByLabel(/^To \(/).fill(to);
-  await withdraw.getByLabel('Amount (USDT)').fill('1');
+  await withdraw.getByLabel('Address').fill(to);
+  await withdraw.getByLabel('Enter amount').fill('1');
   await confirm(page, withdraw, 'unshield-status', /^Withdrew /);
   say('withdrew 1 USDT');
 

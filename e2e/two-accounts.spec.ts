@@ -11,13 +11,13 @@ test('a second account in the same browser loads its wallet', async ({ page }) =
   await disableAutofill(page);
   await Device.add(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  const addMoney = page.getByRole('region', { name: /Add money/ });
+  const addMoney = page.getByRole('dialog', { name: 'Receive' });
 
   // Account A saves a deposit record (an Ethereum deposit address).
   await signUp(page);
   await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
   await openSheet(page, 'Receive');
-  await addMoney.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  await addMoney.getByRole('button', { name: 'Ethereum Sepolia' }).click();
   await expect(addMoney.locator('code.address').first()).toHaveText(/^0x/, { timeout: 60_000 });
   await closeSheet(page);
   await signOut(page);

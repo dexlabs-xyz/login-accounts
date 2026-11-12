@@ -5,7 +5,7 @@
  * (deposit + privacy check + proofs). TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
-import { openSheet } from './helpers.ts';
+import { chooseSend, errorToast, spendableUsdt } from './helpers.ts';
 import { Contract, JsonRpcProvider, Wallet } from 'ethers';
 import { ERC20, fundedAccount, log, provider, watch } from './live.ts';
 
@@ -20,12 +20,11 @@ const SOL_RECIPIENT = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin';
 
 test('withdraws through NEAR Intents (default: USDC on Solana, then ETH on Sepolia); refuses ETH over Tidepool’s cap', async ({ page }) => {
   const { funder } = await fundedAccount(page, say);
-  await openSheet(page, 'Send'); // Withdraw sits in the Send pop-up until it's redesigned
-  const panel = page.getByRole('region', { name: /^Withdraw/ });
-  const receiveAs = panel.getByTestId('withdraw-receive-as');
-  const amount = panel.getByLabel('Amount (USDT)');
-  const toField = panel.getByLabel(/^To \(/);
-  await expect(receiveAs.locator('option')).toHaveCount(6, { timeout: 60_000 }); // USDT + the five agreed
+  // Send → "To an Ethereum address" (USDT + four swaps) or "To a Solana address" (USDC on Solana devnet).
+  let panel = await chooseSend(page, 'To an Ethereum address');
+  const fields = () => ({ receiveAs: panel.getByTestId('withdraw-receive-as'), amount: panel.getByLabel('Enter amount'), toField: panel.getByLabel('Address') });
+  let { receiveAs, amount, toField } = fields();
+  await expect(receiveAs.locator('option')).toHaveCount(5, { timeout: 60_000 }); // USDT + the four agreed on Ethereum chains
 
   /**
    * After a withdrawal, the leftover ("change") waits for its own privacy check
@@ -35,7 +34,7 @@ test('withdraws through NEAR Intents (default: USDC on Solana, then ETH on Sepol
   const waitSpendable = async (usdt: string) => {
     const t0 = Date.now();
     await expect
-      .poll(async () => (await page.keyboard.press('Shift'), Number(/Spendable now: ([\d.]+) USDT/.exec((await panel.textContent({ timeout: 1_000 }).catch(() => '')) ?? '')?.[1] ?? 0)), {
+      .poll(async () => (await page.keyboard.press('Shift'), await spendableUsdt(page)), {
         timeout: 150 * 60_000,
         intervals: [15_000],
       })
@@ -53,6 +52,8 @@ test('withdraws through NEAR Intents (default: USDC on Solana, then ETH on Sepol
 
   const withdraw = async (option: RegExp, to: string, usdt: string) => {
     await waitSpendable(usdt);
+    panel = await chooseSend(page, /Solana/.test(String(option)) ? 'To a Solana address' : 'To an Ethereum address');
+    ({ receiveAs, amount, toField } = fields());
     await receiveAs.selectOption({ label: (await receiveAs.locator('option').allTextContents()).find((t) => option.test(t))! });
     await toField.fill(to);
     await amount.fill(usdt);
@@ -63,19 +64,21 @@ test('withdraws through NEAR Intents (default: USDC on Solana, then ETH on Sepol
       await expect(panel.getByTestId('withdraw-swap-receives')).toBeVisible({ timeout: 180_000 });
       say(`review: ${(await panel.innerText()).replace(/\n+/g, ' | ').slice(0, 600)}`);
       await panel.getByRole('button', { name: 'Confirm with passkey' }).click();
-      await expect(panel.getByTestId('unshield-status').or(panel.getByRole('alert'))).toBeVisible();
+      const errors = await page.locator('[data-sonner-toast][data-type="error"]').count();
+      const newError = async () => (await page.locator('[data-sonner-toast][data-type="error"]').count()) > errors;
+      await expect(panel.getByTestId('unshield-status').or(errorToast(page))).toBeVisible();
       const outcome = await expect
         .poll(
           async () =>
-            (await panel.getByRole('alert').isVisible())
-              ? `alert: ${await panel.getByRole('alert').textContent({ timeout: 1_000 }).catch(() => '')}`
+            (await newError())
+              ? `alert: ${await errorToast(page).textContent({ timeout: 1_000 }).catch(() => '')}`
               : ((await panel.getByTestId('unshield-status').textContent({ timeout: 1_000 }).catch(() => '')) ?? ''),
           { timeout: 20 * 60_000, intervals: [3_000] },
         )
         .toMatch(/^(alert: |Withdrew )/)
-        .then(() => panel.getByRole('alert').isVisible());
+        .then(() => newError());
       if (!outcome) break;
-      const alert = (await panel.getByRole('alert').textContent()) ?? '';
+      const alert = (await errorToast(page).textContent()) ?? '';
       say(`attempt ${attempt}: ${alert}`);
       if (!/network relay couldn’t confirm/.test(alert) || attempt >= 4) throw new Error(`Withdrawal failed: ${alert}`);
     }
@@ -84,11 +87,11 @@ test('withdraws through NEAR Intents (default: USDC on Solana, then ETH on Sepol
   };
 
   // ETH on Sepolia: over Tidepool's 0.006 ETH cap is refused before anything is sent.
-  await receiveAs.selectOption({ label: 'ETH on Ethereum Sepolia (swapped through NEAR Intents)' });
+  await receiveAs.selectOption({ label: 'ETH on Ethereum Sepolia' });
   await toField.fill(Wallet.createRandom().address);
   await amount.fill('50');
   await panel.getByRole('button', { name: 'Review' }).click();
-  await expect(panel.getByRole('alert')).toContainText('at most 0.006 ETH', { timeout: 120_000 });
+  await expect(errorToast(page)).toContainText('at most 0.006 ETH', { timeout: 120_000 });
 
   // The funding wallet is still flagged when the swap delivers to it (same address, same owner).
   await toField.fill(funder);

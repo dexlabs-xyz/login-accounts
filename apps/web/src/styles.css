@@ -253,8 +253,10 @@ h3 { margin: 0.5rem 0 0; }
 .side-balance { display: flex; align-items: center; gap: 4px; font-size: 16px; line-height: 19.447px; }
 .side-balance .icon-btn { padding: 0; }
 .side-balance > span { opacity: 0.6; }
-.icon-btn { display: inline-grid; place-items: center; padding: 2px; border: none; background: none; border-radius: 6px; cursor: pointer; opacity: 0.9; }
-.icon-btn:hover:not(:disabled) { opacity: 1; background: rgba(255, 255, 255, 0.06); }
+/* Stand-alone icons (copy, eye, ∞, step arrows): no frame behind them; hovering brings them to full opacity (Gold, 12 Nov).
+   Keyboard focus still shows an outline, for people who navigate without a mouse. */
+.icon-btn { display: inline-grid; place-items: center; padding: 2px; border: none; background: none; border-radius: 6px; cursor: pointer; opacity: 0.7; transition: opacity 0.15s ease; }
+.icon-btn:hover:not(:disabled) { opacity: 1; }
 .icon-btn:disabled { opacity: 0.3; cursor: default; }
 .icon-btn img { display: block; }
 .side-copy { padding: 0; } /* flush with the column's right edge, as in Figma */
@@ -358,16 +360,24 @@ h3 { margin: 0.5rem 0 0; }
 .activity-status { font-size: 12px; line-height: 16px; color: var(--muted); }
 .activity-status.is-spendable, .activity-status.is-done { color: #49e63b; }
 .activity-status.is-blocked { color: var(--error); }
+.activity-status.is-checking { color: var(--fg); opacity: 0.6; }
+/* Resume / Finish on an unfinished deposit (same look as the pop-up buttons). */
+.activity-action { height: 28px; padding: 0 12px; border: none; border-radius: 6px; background: var(--accent); color: #000; font-size: 13px; line-height: 18px; }
+.activity-action:hover { background: #1d4ed8; }
 
 /* Settings and Verification pages reuse the older cards until they're redesigned. */
 .app-main > .link { justify-self: start; }
 .app-main > .card, .app-main > .warning { max-width: 799px; }
 
 /* ---------- Pop-ups ---------- */
-.modal { padding: 0; border: none; background: transparent; color: var(--fg); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: visible; }
-.modal::backdrop { background: rgba(8, 8, 8, 0.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.modal[open] { animation: modal-in 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
-.modal[open]::backdrop { animation: fade-in 0.22s ease; }
+/* A layer of its own (not the browser's top layer), under the toasts so pop-up toasts show over the blur. */
+.modal-layer { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; }
+.modal-layer.is-closed { visibility: hidden; pointer-events: none; }
+/* Half as strong as before (Gold, 12 Nov): blur 4px (Figma's value), a light dim. */
+.modal-backdrop { position: absolute; inset: 0; background: rgba(8, 8, 8, 0.28); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.modal-layer.is-open .modal-backdrop { animation: fade-in 0.22s ease; }
+.modal { position: relative; color: var(--fg); max-width: 100%; max-height: calc(100dvh - 32px); outline: none; }
+.modal-layer.is-open .modal { animation: modal-in 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
 @keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .modal-panel { width: 403px; max-width: 100%; max-height: calc(100dvh - 32px); overflow: auto; background: #0b0b0b; border: 0.5px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 18px 20px 20px; display: grid; gap: 14px; }
@@ -416,5 +426,94 @@ h3 { margin: 0.5rem 0 0; }
   .panel-note, .panel-empty { padding-left: 16px; padding-right: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .app-main, .modal[open], .modal[open]::backdrop, .hero-syncing { animation: none; }
+  .app-main, .modal-layer.is-open .modal, .modal-layer.is-open .modal-backdrop, .hero-syncing { animation: none; }
 }
+
+/* ---------- Pop-up sheets (Figma: Receive 433:5445 / 433:5643 / 444:6036 / 444:6213) ---------- */
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-SemiBold.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+.modal-panel:has(> .sheet) { width: 403px; padding: 19.8px; border-radius: 20px; background: #080808; border: 1px solid rgba(255, 255, 255, 0.13); gap: 0; }
+/* Columns may shrink below their content: the full address (one unbroken line) otherwise pushed the pop-up
+   13px wider than its box, which showed a horizontal scrollbar over the bottom corners (Gold, 12 Nov). */
+.sheet, .sheet-body, .sheet-group { grid-template-columns: minmax(0, 1fr); }
+.sheet { display: grid; }
+.sheet-step { overflow: hidden; margin: 0 -3px; } /* clips the step while its height animates */
+/* What gets measured: flow-root keeps the subtitle's top margin inside the measurement (it was escaping and cutting
+   ~20px off the bottom), and the 3px keep field outlines visible inside the clip. */
+.sheet-step > div { display: flow-root; padding: 0 3px 3px; }
+.modal-panel { overflow-x: hidden; }
+/* Figma's text boxes: title 15 tall, subtitle and labels 12 tall (the text overflows them slightly, as in Figma). */
+.sheet-head { display: flex; align-items: center; justify-content: space-between; height: 15px; }
+.sheet-head h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 15px; }
+.sheet-steps { display: flex; gap: 0; }
+.sheet-steps .icon-btn { padding: 2px; }
+.sheet-steps .icon-btn:disabled { opacity: 0.35; }
+/* The < > step arrows keep a box on hover (Gold, 12 Nov); other icons don't. */
+.sheet-steps .icon-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+.sheet-sub { margin-top: 20px; font-size: 16px; line-height: 12px; opacity: 0.7; }
+.sheet-list { display: grid; gap: 14px; margin-top: 31px; }
+.sheet-row {
+  height: 35px; display: flex; align-items: center; gap: 7px; padding: 0 13.7px; border: none; border-radius: 7.88px;
+  background: var(--card); color: var(--fg); font-size: 13.133px; line-height: 18.467px; text-align: left; transition: background-color 0.15s ease;
+}
+.sheet-row:hover:not(:disabled) { background: #1f1f1f; }
+.sheet-row:disabled { cursor: progress; }
+.sheet-row > span { flex: 1; }
+.sheet-row img { display: block; }
+.sheet-body { display: grid; gap: 18px; margin-top: 28px; }
+.sheet-body.is-form { gap: 25px; margin-top: 31px; }
+.sheet-qr { height: 247px; border-radius: 7.88px; background: var(--card); border: 1px solid #000; display: grid; place-items: center; margin-bottom: 10px; }
+.qr { display: block; color: #fff; }
+.sheet-group { display: grid; gap: 18px; font-weight: 400; } /* not the old label weight: field text is Regular (Gold) */
+.sheet-label { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 400; line-height: 12px; height: 12px; opacity: 0.6; margin: 0; }
+.sheet-label img { opacity: 1; cursor: help; }
+.sheet-field {
+  position: relative; height: 35px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 7.88px; background: var(--card);
+  font-size: 13.133px; line-height: 18.467px;
+}
+.sheet-field code { font-family: inherit; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-field input, .sheet-field select {
+  flex: 1; min-width: 0; height: 100%; padding: 0; border: none; background: transparent; color: var(--fg);
+  font: inherit; font-size: 13.133px; outline: none; appearance: none; -webkit-appearance: none;
+}
+.sheet-field input::placeholder { color: var(--fg); opacity: 0.6; }
+/* Only typing fields light up blue, not a field whose copy icon was just pressed. */
+.sheet-field:has(input:focus, select:focus) { box-shadow: 0 0 0 1px var(--accent); }
+.sheet-field.is-error, .sheet-field.is-error:has(input:focus, select:focus) { box-shadow: 0 0 0 1px #dc2626; } /* refused value: red outline (Gold) */
+.sheet-field.is-select img { pointer-events: none; }
+.sheet-field select option { background: #171717; }
+.sheet-copy { padding: 0; flex: none; }
+.sheet-warning { display: flex; align-items: center; gap: 5.5px; min-height: 62px; padding: 10px 14px 10px 10.5px; border-radius: 7.88px; background: #431407; }
+.sheet-warning img { flex: none; display: block; }
+.sheet-warning p { font-size: 10px; line-height: 14px; color: #f97316; }
+.sheet-note { font-size: 12px; line-height: 17px; opacity: 0.6; }
+.sheet-status { font-size: 12px; line-height: 17px; color: var(--fg); }
+.sheet-status.is-warn { color: #f97316; }
+.sheet-status.is-error { color: var(--error); }
+.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 17px; }
+.sheet-btn {
+  height: 35px; border: none; border-radius: 7.88px; background: var(--card); color: var(--fg);
+  font-size: 13.133px; font-weight: 500; line-height: 18.467px; padding: 0 12px; transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+.sheet-btn:hover:not(:disabled) { background: #1f1f1f; }
+.sheet-btn.is-primary { background: var(--accent); color: #000; }
+.sheet-btn.is-primary:hover:not(:disabled) { background: #1d4ed8; }
+.sheet-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.sheet-summary { display: grid; gap: 4px; margin: 3px 0 0; } /* + the body's 28 = Figma's 31 under the subtitle */
+.sheet-summary > div { height: 35px; display: flex; align-items: center; justify-content: space-between; padding: 0 11.5px; background: var(--card); font-size: 13.133px; line-height: 18.467px; }
+.sheet-summary > div:first-child { border-radius: 7.88px 7.88px 0 0; }
+.sheet-summary > div:last-child { border-radius: 0 0 7.88px 7.88px; }
+.sheet-summary dt { opacity: 0.7; }
+.sheet-summary dd { margin: 0; display: flex; align-items: center; gap: 5px; text-align: right; }
+.sheet-summary + .sheet-group { margin-top: 10px; }
+@media (max-width: 480px) { .modal-panel:has(> .sheet) { width: calc(100vw - 32px); } }
+
+/* ---------- Send pop-up extras (review, sending, sent) ---------- */
+.sheet-warning.is-danger { background: #450a0a; }
+.sheet-warning.is-danger p { color: #f87171; }
+.sheet-warning p strong { font-weight: 600; }
+.sheet-summary dd code { font-family: inherit; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-btn-spinner { display: block; margin: 0 auto; filter: brightness(0); }
+.sheet-progress { justify-items: center; text-align: center; gap: 12px; padding: 12px 0 4px; }
+.sheet-progress p { font-size: 14px; line-height: 20px; max-width: 320px; }
+.sheet-progress .sheet-actions { width: 100%; margin-top: 8px; }
+.sheet-progress a.sheet-note { color: var(--fg); }

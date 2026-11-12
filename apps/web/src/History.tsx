@@ -13,6 +13,7 @@ import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS, type HistoryEntry, type WithdrawalSwap } from './railgun/protocol.ts';
 import { formatUnits } from './deposits/tidepool.ts';
 import { usd } from './money.ts';
+import type { PendingItem } from './deposits/pending.ts';
 
 const TOKENS: Record<string, { label: string; decimals: number }> = {
   [SEPOLIA_USDT.toLowerCase()]: { label: 'USDT', decimals: USDT_DECIMALS },
@@ -181,6 +182,7 @@ export function Activity({
   hidden = false,
   hideTitle = false,
   card = false,
+  pending = [],
 }: {
   title: string;
   /** Rows to show; the rest are a "Show all" away (or "View all" on Home). */
@@ -192,6 +194,8 @@ export function Activity({
   hideTitle?: boolean;
   /** Home's card: full width, fixed 336px height, with a centred message when there's nothing yet (Figma 549:8784). */
   card?: boolean;
+  /** Deposits not finished yet: listed first, with Resume / Finish (Gold, 12 Nov). */
+  pending?: PendingItem[];
 }) {
   const { entries, failed, describe, isClaim, swapOf } = useHistory();
   const [all, setAll] = useState(false);
@@ -208,13 +212,16 @@ export function Activity({
     return () => ro.disconnect();
   }, [card]);
   const max = card ? Math.min(limit ?? Infinity, fits) : limit;
-  const shown = entries ? (all || !max ? entries : entries.slice(0, max)) : [];
+  const pend = all || !max ? pending : pending.slice(0, max);
+  const room = max ? Math.max(0, max - pend.length) : Infinity;
+  const shown = entries ? (all || !max ? entries : entries.slice(0, room)) : [];
+  const nothing = entries?.length === 0 && pending.length === 0;
   const id = `activity-${title.toLowerCase().replace(/\W+/g, '-')}`;
   return (
     <section ref={box} className={`panel activity${card ? ' is-card' : ''}`} aria-labelledby={id}>
-      <div className={hideTitle || (card && entries?.length === 0) ? 'visually-hidden' : 'panel-head'}>
+      <div className={hideTitle || (card && nothing) ? 'visually-hidden' : 'panel-head'}>
         <h2 id={id}>{title}</h2>
-        {onViewAll && entries && entries.length > 0 && (
+        {onViewAll && !nothing && entries && (
           <button type="button" className="panel-link" onClick={onViewAll}>
             View all
           </button>
@@ -222,7 +229,7 @@ export function Activity({
       </div>
       {failed && <p className="panel-empty">Couldn’t load your history. Lock and unlock to try again.</p>}
       {!failed && !entries && (card ? <div className="activity-empty"><span>Loading…</span></div> : <p className="panel-empty">Loading…</p>)}
-      {entries && entries.length === 0 &&
+      {nothing &&
         (card ? (
           <div className="activity-empty">
             <strong>No notifications yet</strong>
@@ -231,8 +238,30 @@ export function Activity({
         ) : (
           <p className="panel-empty">Nothing yet. Deposits, sends and withdrawals show up here.</p>
         ))}
-      {shown.length > 0 && (
+      {(shown.length > 0 || pend.length > 0) && (
         <ul className="activity-list" data-testid="history">
+          {pend.map((p) => (
+            <li key={p.key} data-kind="pending">
+              <span className="activity-icon" aria-hidden="true">
+                <img src="/img/arrow-down-to-line.svg" alt="" width={18} height={18} />
+              </span>
+              <div className="activity-main">
+                <span className="activity-what">{p.title}</span>
+                <span className="activity-when">
+                  {longDate(p.when)} · {p.detail}
+                </span>
+              </div>
+              <div className="activity-side">
+                {p.action ? (
+                  <button type="button" className="activity-action" onClick={p.action.run}>
+                    {p.action.label}
+                  </button>
+                ) : (
+                  <span className="activity-status is-checking">In progress</span>
+                )}
+              </div>
+            </li>
+          ))}
           {shown.map((e) => {
             const out = OUTGOING.has(e.kind);
             const delta = usdDelta(e);
