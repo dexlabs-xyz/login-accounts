@@ -25,8 +25,8 @@ changes **how things look and move**, not what they do or say about safety.
   They hold keys and money logic and were tested live.
 - `apps/server/` beyond styling the consent page, `AGENTS.md`, `.internal/`.
 - New dependencies: ask Gold first. Approved 12 Nov and pinned: `motion` 14.7.1 (motion.dev, MIT, the free
-  version only: no paid Motion+ code in this public repo) and `sonner` 2.0.8 (toasts, MIT). Never add crypto or
-  auth packages.
+  version only: no paid Motion+ code in this public repo), `sonner` 2.0.8 (toasts, MIT) and `uqr` 0.1.3 (QR
+  codes, MIT, no dependencies). Never add crypto or auth packages.
 - The Sumsub SDK must keep loading only after the user presses Continue (Kyc.tsx).
 
 ## Keep (tests and trust depend on them)
@@ -43,10 +43,16 @@ test in the same change and say so:
   `withdraw-receives`, `withdraw-swap-receives`, `withdraw-receive-as`,
   `withdraw-linked-warning`, `human-status`, `connected-apps`, `history`.
 - **Regions (a `section` with an `h2` via `aria-labelledby`):** Private balance (Home),
-  Notifications (Home's card and the Notifications page; was History), Verification (Verification page);
-  Send privately and Withdraw inside the **Send** pop-up, Add money inside the **Receive** pop-up, until those
-  pop-ups are redesigned. Test funds is now the **Test USDT** button on Home. e2e helpers: `goTo(page, 'Settings')`,
-  `openSheet(page, 'Send' | 'Receive')`, `closeSheet(page)`.
+  Notifications (Home's card and the Notifications page; was History), Verification (Verification page).
+  Pop-ups are `role="dialog"` named **Send** / **Receive** (no × button: Esc or the backdrop closes them).
+  Receive: Solana / Ethereum Sepolia rows; Select token, Enter amount, Refund address, Get Deposit Address.
+  Send: Privately via Railgun / To an Ethereum address / To a Solana address; fields 0zk address or Address,
+  Select token (`withdraw-receive-as`), Enter amount; Review → Confirm with passkey; Sent → Withdraw/Send again.
+  Each Send form stays mounted while you step around: scope to `[data-send-mode="private|evm|sol"]`.
+  Errors are Sonner toasts (`[data-sonner-toast][data-type="error"]`), plus `aria-invalid` on the field.
+  Unfinished deposits sit at the top of Notifications (`li[data-kind="pending"]`, Resume / Finish).
+  Test USDT is a button on Home. e2e helpers: `goTo`, `openSheet`, `closeSheet`, `chooseSend`, `errorToast`,
+  `spendableUsdt`.
 - **Headings:** "Welcome" (was "Sign up or sign in"), "Home" (screen-reader only; was "Your account"),
   "Check your email" (code step), "Notifications", "Verification", "Settings", "Confirm it’s you",
   "Sign in to continue", "This sign-in link doesn’t work", "Sign-in did not complete".
