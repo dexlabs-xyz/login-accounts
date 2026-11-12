@@ -3,7 +3,7 @@
  * (docs/design/passkeys.md).
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, freshEmail, latestCode, recordSecrets, recordWebAuthnCalls, signOut, signUp, verifyEmail, walletCheck } from './helpers.ts';
+import { Device, disableAutofill, freshEmail, goTo, latestCode, recordSecrets, recordWebAuthnCalls, signOut, signUp, verifyEmail, walletCheck } from './helpers.ts';
 
 // Chrome's virtual authenticator answers autofill requests instantly, which a
 // real user never does. Keep autofill off except where a test turns it on.
@@ -19,6 +19,7 @@ test.describe('sign-up', () => {
   test('happy path: synced passkey with PRF creates and opens a wallet (D1, D3)', async ({ page }) => {
     await Device.add(page, { prf: true, synced: true });
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await expect(page.getByText('Unlocked')).toBeVisible();
     await expect(page.getByText('Synced passkey')).toBeVisible();
     await expect(page.getByText('You could lose access')).toHaveCount(0);
@@ -27,6 +28,7 @@ test.describe('sign-up', () => {
   test('device-only passkey shows the lose-your-money warning (D4)', async ({ page }) => {
     await Device.add(page, { prf: true, synced: false });
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await expect(page.getByText('Device-only passkey')).toBeVisible();
     await expect(page.getByRole('alert').filter({ hasText: 'You could lose access to your money' })).toBeVisible();
   });
@@ -34,6 +36,7 @@ test.describe('sign-up', () => {
   test('no PRF: account works for sign-in, wallet is clearly unavailable here (D7)', async ({ page }) => {
     await Device.add(page, { prf: false });
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await expect(page.getByText('this device can’t open your Login wallet')).toBeVisible();
     await expect(page.getByText('No wallet yet.')).toBeVisible();
   });
@@ -49,6 +52,7 @@ test.describe('sign-up', () => {
   test('email that already has an account is sent to passkey sign-in (D2)', async ({ page }) => {
     await Device.add(page);
     const email = await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await signOut(page);
     await verifyEmail(page, email);
     await expect(page.getByText('You already have an account. Sign in with your passkey.')).toBeVisible();
@@ -67,6 +71,7 @@ test.describe('sign-in and unlock', () => {
   test('sign out, sign back in: same wallet opens (D5)', async ({ page }) => {
     await Device.add(page);
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     const before = await walletCheck(page);
     await signOut(page);
     await page.getByRole('button', { name: 'Sign in with passkey' }).click();
@@ -77,6 +82,7 @@ test.describe('sign-in and unlock', () => {
   test('refreshing the page locks the wallet; passkey unlocks it (D5)', async ({ page }) => {
     await Device.add(page);
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     const before = await walletCheck(page);
     await page.reload();
     await expect(page.getByText('Locked')).toBeVisible();
@@ -87,6 +93,7 @@ test.describe('sign-in and unlock', () => {
   test('passkey deleted from the device: sign-in fails with a clear message', async ({ page }) => {
     const device = await Device.add(page);
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await signOut(page);
     await device.forgetAll();
     await page.getByRole('button', { name: 'Sign in with passkey' }).click();
@@ -97,12 +104,13 @@ test.describe('sign-in and unlock', () => {
 test('returning user signs in from the email field autofill (D2)', async ({ page }) => {
   await Device.add(page);
   await signUp(page);
+  await goTo(page, 'Settings'); // wallet and passkeys live in Settings
   const before = await walletCheck(page);
   await signOut(page);
   // Turn autofill on for this tab: the passkey is offered in the email field.
   await page.evaluate(() => sessionStorage.setItem('e2e-autofill', 'on'));
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Your account' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible(); // the page you were on, kept through sign-out
   await expect(page.getByText('Unlocked')).toBeVisible();
   expect(await walletCheck(page)).toBe(before);
 });
@@ -111,6 +119,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
   test('a second passkey on another device opens the same wallet on its own', async ({ page }) => {
     const laptop = await Device.add(page, { synced: false });
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     const before = await walletCheck(page);
     await expect(page.getByText('You could lose access')).toBeVisible();
 
@@ -132,6 +141,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
   test('cannot remove the only passkey that opens the wallet', async ({ page }) => {
     const laptop = await Device.add(page);
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await laptop.remove();
     await Device.add(page, { prf: false }); // sign-in only passkey
     await page.getByRole('button', { name: 'Other options' }).click();
@@ -145,6 +155,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
   test('a passkey whose storage has no PRF is explained, and can be kept or removed (Brave case)', async ({ page }) => {
     const laptop = await Device.add(page);
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await laptop.remove();
     const brave = await Device.add(page, { prf: false, synced: false });
     await page.getByRole('button', { name: 'Other options' }).click();
@@ -168,6 +179,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
   test('removing the sign-in-only passkey from the list also closes its keep/remove panel', async ({ page }) => {
     const laptop = await Device.add(page);
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await laptop.remove();
     await Device.add(page, { prf: false, synced: false });
     await page.getByRole('button', { name: 'Other options' }).click();
@@ -183,6 +195,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
   test('a passkey added while the wallet was locked can be connected later, then opens the wallet alone', async ({ page }) => {
     const laptop = await Device.add(page);
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     const before = await walletCheck(page);
     await page.getByRole('button', { name: 'Lock' }).click();
 
@@ -219,6 +232,7 @@ test.describe('choosing where a backup passkey goes', () => {
     const calls = await recordWebAuthnCalls(page);
     await Device.add(page);
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await Device.add(page, { transport: 'usb' });
 
     const expected: [string, string[] | undefined, string | undefined][] = [
@@ -244,6 +258,7 @@ test.describe('choosing where a backup passkey goes', () => {
     const calls = await recordWebAuthnCalls(page);
     const laptop = await Device.add(page);
     await signUp(page);
+    await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     await laptop.setResponds(false);
     const key = await Device.add(page, { transport: 'usb' });
     await page.getByRole('button', { name: 'Add a security key' }).click();
@@ -329,6 +344,7 @@ test('no secret ever leaves the device or lands in storage (D6)', async ({ page 
   const leaks = await recordSecrets(page);
   await Device.add(page);
   await signUp(page);
+  await goTo(page, 'Settings'); // "Confirm a test send" lives in Settings
   await signOut(page);
   await page.getByRole('button', { name: 'Sign in with passkey' }).click();
   await expect(page.getByText('Unlocked')).toBeVisible();

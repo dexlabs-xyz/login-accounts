@@ -3,7 +3,7 @@
  * broadcaster. Slow (deposit + privacy checks + proof). TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, signUp } from './helpers.ts';
+import { Device, disableAutofill, openSheet, signUp } from './helpers.ts';
 import { fundedAccount, log, watch } from './live.ts';
 
 test.describe.configure({ timeout: 180 * 60_000 });
@@ -24,6 +24,7 @@ test('A sends USDT privately to B through a broadcaster', async ({ page, browser
   expect(addressB).toMatch(/^0zk/);
 
   // --- A sends 0.5 USDT to B: review shows the fee, confirm with passkey, proof, broadcaster.
+  await openSheet(page, 'Send');
   const send = page.getByRole('region', { name: /Send privately/ });
   await send.getByLabel('To (private 0zk address)').fill(addressB);
   await send.getByLabel('Amount (USDT)').fill('0.5');

@@ -3,8 +3,14 @@ import { browserSupportsWebAuthnAutofill } from '@simplewebauthn/browser';
 import { api, ApiError } from './api.ts';
 import { KycCard, type KycStatus } from './Kyc.tsx';
 import { ConnectedApps } from './ConnectedApps.tsx';
-import { History } from './History.tsx';
-import { TestFunds } from './TestFunds.tsx';
+import { Activity } from './History.tsx';
+import { ClaimWatcher, TestUsdtButton } from './TestFunds.tsx';
+import { Frame, useCopyAddress, useHideBalance, usePage, useUsdTotal } from './home/Frame.tsx';
+import { BalanceChart } from './home/BalanceChart.tsx';
+import { CopyAddressButton } from './home/CopyButton.tsx';
+import { Modal } from './ui/Modal.tsx';
+import { ToastProvider } from './ui/toast.tsx';
+import { usd } from './money.ts';
 import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS } from './railgun/protocol.ts';
 import { AddMoney } from './deposits/AddMoney.tsx';
@@ -56,7 +62,8 @@ function explain(err: unknown): string {
       'passkey-not-verified': 'The passkey couldn’t be checked. Try again.',
       'ceremony-expired': 'That took too long. Try again.',
       'last-passkey': 'You can’t remove your only passkey.',
-      'last-wallet-passkey': 'This is the only passkey that can open your wallet. Add another one first, or you’d lose access to your money.',
+      'last-wallet-passkey':
+        'This is the only passkey that can open your wallet. Add another one first, or you’d lose access to your money.',
       'email-taken': 'That email already has an account. Sign in instead.',
       'signed-out': 'You’ve been signed out. Sign in again.',
     };
@@ -67,7 +74,8 @@ function explain(err: unknown): string {
     if (code === 'ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED' || err.name === 'InvalidStateError') {
       return 'This device already has a passkey for this account. Use “Sign in with passkey” instead.';
     }
-    if (err.name === 'NotAllowedError') return 'The passkey prompt was closed or timed out. Nothing changed. Try again when ready.';
+    if (err.name === 'NotAllowedError')
+      return 'The passkey prompt was closed or timed out. Nothing changed. Try again when ready.';
     if (err.name === 'AbortError') return '';
     return err.message;
   }
@@ -94,7 +102,11 @@ export function App() {
   const path = location.pathname;
   if (path === '/dev/outbox') return <DevOutbox />;
   if (path === '/signin') return <SignInHandoff />;
-  return <Main />;
+  return (
+    <ToastProvider>
+      <Main />
+    </ToastProvider>
+  );
 }
 
 function useWalletOpen() {
@@ -117,9 +129,21 @@ const BUCKET_LABELS: Record<string, string> = {
 /** Private balance from the Railgun wallet (Sepolia testnet). Shown only while unlocked. */
 /** Known tokens in the private balance. TESTNET addresses (Sepolia). */
 const KNOWN_TOKENS: Record<string, { key: string; label: string; decimals: number }> = {
-  [SEPOLIA_USDT.toLowerCase()]: { key: 'usdt', label: 'USDT', decimals: USDT_DECIMALS },
-  [SEPOLIA_USDC.toLowerCase()]: { key: 'usdc', label: 'USDC', decimals: USDC_DECIMALS },
-  [SEPOLIA_WETH.toLowerCase()]: { key: 'eth', label: 'ETH (for network fees)', decimals: 18 },
+  [SEPOLIA_USDT.toLowerCase()]: {
+    key: 'usdt',
+    label: 'USDT',
+    decimals: USDT_DECIMALS,
+  },
+  [SEPOLIA_USDC.toLowerCase()]: {
+    key: 'usdc',
+    label: 'USDC',
+    decimals: USDC_DECIMALS,
+  },
+  [SEPOLIA_WETH.toLowerCase()]: {
+    key: 'eth',
+    label: 'ETH (for network fees)',
+    decimals: 18,
+  },
 };
 const tokenKey = (address: string) => KNOWN_TOKENS[address.toLowerCase()]?.key ?? 'other';
 const tokenLabel = (address: string) => {
@@ -134,9 +158,15 @@ const tokenAmount = (address: string, amount: string) => {
 /** How long a sync may show no progress before we say so and offer a retry. */
 const SYNC_STALL_MS = 45_000;
 
-function PrivateBalance() {
+/**
+ * Home's top block (Figma: Private balance, then Test USDT / Send / Receive / Copy address).
+ * The big number is everything private; the small line under it says what's spendable now and
+ * what's still in Railgun's privacy check (the browser tests read it: balance-<Bucket>-<token>).
+ */
+function PrivateBalance({ hidden, onSend, onReceive }: { hidden: boolean; onSend: () => void; onReceive: () => void }) {
   const pw = usePrivateWallet();
-  const [copied, setCopied] = useState(false);
+  const total = useUsdTotal();
+  const { address } = useCopyAddress();
   const [stalled, setStalled] = useState(false);
   // Any change in status or progress resets the stall timer.
   useEffect(() => {
@@ -146,7 +176,7 @@ function PrivateBalance() {
     return () => clearTimeout(t);
   }, [pw.status, pw.scanProgress]);
   if (pw.status === 'off') return null;
-  const isReserve = (address: string) => address.toLowerCase() === SEPOLIA_WETH.toLowerCase();
+  const isReserve = (a: string) => a.toLowerCase() === SEPOLIA_WETH.toLowerCase();
   const all = Object.entries(pw.balances)
     .filter(([bucket]) => bucket !== 'Spent')
     .flatMap(([bucket, list]) => (list ?? []).filter((t) => t.amount !== '0').map((t) => ({ bucket, ...t })));
@@ -154,11 +184,74 @@ function PrivateBalance() {
   const rows = all.filter((r) => !isReserve(r.tokenAddress));
   const reserve = all.filter((r) => isReserve(r.tokenAddress));
   const reserveState = reserve.some((r) => r.bucket === 'Spendable') ? 'ready' : reserve.length ? 'pending' : 'empty';
+  const money = (address: string, amount: string) => {
+    const t = KNOWN_TOKENS[address.toLowerCase()];
+    if (hidden) return '••••';
+    return t && t.key !== 'eth' ? usd(amount, t.decimals) : tokenAmount(address, amount);
+  };
+  const ready = pw.status === 'ready' || pw.status === 'syncing';
+
   return (
-    <section className="card" aria-labelledby="private-h">
-      <h2 id="private-h">
-        Private balance <span className="badge">Sepolia testnet</span>
+    <section className="hero" aria-labelledby="private-h">
+      <h2 id="private-h" className="hero-label">
+        Private balance
       </h2>
+      {/* Amount, with what's happening beside it (Figma: "10% Syncing…", bottom-aligned, 9px apart). */}
+      <div className="hero-row">
+        <p className="hero-amount">{total === null ? '—' : hidden ? '••••••' : usd(total, 6)}</p>
+        <div className="hero-meta">
+          {pw.status === 'starting' && <p className="hero-status">Opening your private wallet…</p>}
+          {pw.status === 'needs-poi' && (
+            <p className="hero-status" role="status">
+              Balance not available yet: this test build has no Railgun Proof of Innocence node configured.
+            </p>
+          )}
+          {pw.status === 'syncing' && !stalled && (
+            <p className="hero-status hero-syncing" role="status">
+              {Math.round(pw.scanProgress * 100)}% Syncing…
+            </p>
+          )}
+          {pw.status === 'syncing' && stalled && (
+            <div className="hero-status" role="status">
+              Syncing is taking longer than usual (stuck at {Math.round(pw.scanProgress * 100)}%). One of the networks your wallet
+              reads from may be slow. Your funds aren’t affected.{' '}
+              <button className="link" onClick={() => (setStalled(false), privateWallet.refresh())}>
+                Retry sync
+              </button>
+            </div>
+          )}
+          {ready &&
+            (rows.length === 0 ? (
+              // "$0.00" says it on screen (Gold: no extra empty-state text); kept for screen readers and the tests.
+              <p className="visually-hidden" data-testid="private-empty">
+                {pw.status === 'ready' ? 'No private funds yet.' : ''}
+              </p>
+            ) : (
+              <p className="hero-status">
+                {rows.map((r, i) => (
+                  <span key={r.bucket + r.tokenAddress}>
+                    {i > 0 && ' · '}
+                    <span data-testid={`balance-${r.bucket}-${tokenKey(r.tokenAddress)}`}>
+                      {money(r.tokenAddress, r.amount)} {BUCKET_LABELS[r.bucket]?.toLowerCase() ?? r.bucket}
+                    </span>
+                  </span>
+                ))}
+              </p>
+            ))}
+          {pw.status === 'ready' && (
+            <p
+              className={reserveState === 'empty' ? 'visually-hidden' : 'hero-status'}
+              data-testid={`fee-reserve-${reserveState}`}
+            >
+              {reserveState === 'ready'
+                ? 'Network fees are covered.'
+                : reserveState === 'pending'
+                  ? 'Network fees: being set up. Covered once your new funds clear.'
+                  : 'Your next deposit sets aside a little to cover network fees for sending and withdrawing.'}
+            </p>
+          )}
+        </div>
+      </div>
       {pw.status === 'error' && (
         <p className="error" role="alert">
           Couldn’t load your private balance. Lock and unlock to try again.
@@ -166,72 +259,25 @@ function PrivateBalance() {
           {pw.error && <span className="muted small"> (Error code: {pw.error})</span>}
         </p>
       )}
-      {pw.status === 'starting' && <p className="muted">Opening your private wallet…</p>}
-      {pw.status === 'needs-poi' && (
-        <p className="muted small" role="status">
-          Balance not available yet: this test build has no Railgun Proof of Innocence node configured.
-        </p>
-      )}
-      {pw.railgunAddress && (
-        <div className="stack">
-          <div className="small muted">Your private address (share it to receive privately)</div>
-          <div className="row">
-            <code className="address" title={pw.railgunAddress}>
-              {pw.railgunAddress.slice(0, 12)}…{pw.railgunAddress.slice(-8)}
-            </code>
-            <button
-              className="link"
-              onClick={() =>
-                void navigator.clipboard.writeText(pw.railgunAddress!).then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                })
-              }
-            >
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-        </div>
-      )}
-      {pw.status === 'syncing' && !stalled && (
-        <p className="muted small" role="status">
-          Syncing… {Math.round(pw.scanProgress * 100)}%
-        </p>
-      )}
-      {pw.status === 'syncing' && stalled && (
-        <div className="stack" role="status">
-          <p className="small">
-            Syncing is taking longer than usual (stuck at {Math.round(pw.scanProgress * 100)}%). One of the networks your
-            wallet reads from may be slow. Your funds aren’t affected.
-          </p>
-          <div>
-            <button onClick={() => (setStalled(false), privateWallet.refresh())}>Retry sync</button>
-          </div>
-        </div>
-      )}
-      {(pw.status === 'ready' || pw.status === 'syncing') &&
-        (rows.length === 0 ? (
-          <p data-testid="private-empty">{pw.status === 'ready' ? 'No private funds yet.' : ''}</p>
-        ) : (
-          <ul className="passkeys">
-            {rows.map((r) => (
-              <li key={r.bucket + r.tokenAddress}>
-                {tokenLabel(r.tokenAddress)}
-                <span data-testid={`balance-${r.bucket}-${tokenKey(r.tokenAddress)}`}>
-                  {tokenAmount(r.tokenAddress, r.amount)}{' '}
-                  <span className="muted small">({BUCKET_LABELS[r.bucket] ?? r.bucket})</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        ))}
-      {pw.status === 'ready' && (
-        <p className="muted small" data-testid={`fee-reserve-${reserveState}`}>
-          {reserveState === 'ready'
-            ? 'Network fees are covered.'
-            : reserveState === 'pending'
-              ? 'Network fees: being set up. Covered once your new funds clear.'
-              : 'Your next deposit sets aside a little to cover network fees for sending and withdrawing.'}
+      <div className="hero-actions">
+        <TestUsdtButton />
+        <button type="button" className="hero-btn" onClick={onSend}>
+          <img src="/img/send.svg" alt="" width={18} height={18} />
+          Send
+        </button>
+        <button type="button" className="hero-btn" onClick={onReceive}>
+          <img src="/img/qr.svg" alt="" width={18} height={18} />
+          Receive
+        </button>
+        <CopyAddressButton address={address} />
+      </div>
+      {/* The private address itself, for screen readers and the browser tests; "Copy address" copies it. */}
+      {address && (
+        <p className="visually-hidden">
+          Your private address:{' '}
+          <code className="address" title={address}>
+            {address}
+          </code>
         </p>
       )}
     </section>
@@ -263,7 +309,12 @@ function Main() {
     await refresh();
   };
 
-  if (me === 'loading') return <Shell><p className="muted">Loading…</p></Shell>;
+  if (me === 'loading')
+    return (
+      <Shell>
+        <p className="muted">Loading…</p>
+      </Shell>
+    );
   if (!me) return <Join onDone={onOutcome} />;
   return <Account me={me} note={note} setNote={setNote} refresh={refresh} />;
 }
@@ -339,8 +390,20 @@ function useFaceSwap(showSecond: boolean) {
     const [enter, exit] = showSecond ? [second.current, first.current] : [first.current, second.current];
     if (!enter || !exit || prefersReducedMotion()) return;
     const timing = { duration: 300, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' };
-    enter.animate([{ opacity: 0, transform: 'translateY(-25px)' }, { opacity: 1, transform: 'none' }], timing);
-    exit.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(25px)' }], timing);
+    enter.animate(
+      [
+        { opacity: 0, transform: 'translateY(-25px)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      timing,
+    );
+    exit.animate(
+      [
+        { opacity: 1, transform: 'none' },
+        { opacity: 0, transform: 'translateY(25px)' },
+      ],
+      timing,
+    );
   }, [showSecond]);
   return { first, second };
 }
@@ -685,7 +748,12 @@ function Join({
           <div className="or" aria-hidden="true">
             <span>Or</span>
           </div>
-          <button type="button" className="passkey-btn" disabled={sending} onClick={() => run(async () => onDone(await signIn()))}>
+          <button
+            type="button"
+            className="passkey-btn"
+            disabled={sending}
+            onClick={() => run(async () => onDone(await signIn()))}
+          >
             <img src="/img/fingerprint.svg" alt="" width={30} height={30} />
             Sign in with passkey
           </button>
@@ -710,12 +778,20 @@ function Join({
               </button>
             )}
           </div>
-          {step === 'working' && <p className="visually-hidden" role="status">Waiting for your passkey…</p>}
+          {step === 'working' && (
+            <p className="visually-hidden" role="status">
+              Waiting for your passkey…
+            </p>
+          )}
         </form>
       )}
       {/* Hangs below the centred content, so a message appearing never moves the form. */}
       <div className="welcome-messages">
-        {info && <p className="info" role="status">{info}</p>}
+        {info && (
+          <p className="info" role="status">
+            {info}
+          </p>
+        )}
         {error && (
           <p className={quietError && codeState === 'wrong' ? 'visually-hidden' : 'error'} role="alert">
             {error}
@@ -772,7 +848,9 @@ function SignInHandoff() {
     return (
       <Shell>
         <h1>This sign-in link doesn’t work</h1>
-        <p role="alert" className="error">Go back to the app you came from and try signing in again.</p>
+        <p role="alert" className="error">
+          Go back to the app you came from and try signing in again.
+        </p>
       </Shell>
     );
   }
@@ -850,180 +928,282 @@ function Account({
   const relevant = me.hasVault ? walletOpeners : me.credentials;
   const atRisk = relevant.length > 0 && relevant.every((c) => !c.backedUp);
 
-  return (
-    <Shell>
-      <h1>Your account</h1>
-      <p className="muted">{me.email}</p>
-      {kyc && (
-        <p data-testid="human-status">
-          {kyc.verifiedHuman ? (
-            <span className="badge ok">Verified human{kyc.sandbox ? ' · test mode' : ''}</span>
-          ) : (
-            <>
-              <span className="badge">Not verified</span>{' '}
-              <a href="#kyc-h" className="small">
-                Verify you’re human
-              </a>
-            </>
-          )}
+  const [page, go] = usePage();
+  const [hidden, toggleHidden] = useHideBalance();
+  const [sheet, setSheet] = useState<'send' | 'receive' | null>(null);
+  const messages = (
+    <>
+      {note && (
+        <p className="info" role="status">
+          {note}
         </p>
       )}
-
-      <section className="card" aria-labelledby="wallet-h">
-        <h2 id="wallet-h">Wallet</h2>
-        {!me.hasVault && (
-          <>
-            <p>No wallet yet.</p>
-            <button disabled={busy} onClick={() => run(async () => setNote(outcomeNote(await setUpWalletHere(me))))}>
-              Set up wallet on this device
-            </button>
-          </>
-        )}
-        {me.hasVault && open && (
-          <>
-            <p>
-              <span className="badge ok">Unlocked</span> Locks after 15 minutes idle or when you close the tab.
-            </p>
-            {fp && <p className="muted small">Wallet check: <code>{fp}</code>. Every passkey should show the same value.</p>}
-            <div className="row">
-              <button
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    const o = await unlock(me);
-                    setNote(o.kind === 'opened' ? 'Confirmed with your passkey. (Test only: nothing was sent.)' : outcomeNote(o));
-                  })
-                }
-              >
-                Confirm a test send
-              </button>
-              <button onClick={() => wallet.lock()}>Lock</button>
-            </div>
-          </>
-        )}
-        {me.hasVault && !open && (
-          <>
-            <p><span className="badge">Locked</span></p>
-            <button className="primary" disabled={busy} onClick={() => run(async () => setNote(outcomeNote(await unlock(me))))}>
-              Unlock with passkey
-            </button>
-          </>
-        )}
-      </section>
-
-      {me.hasVault && open && <PrivateBalance />}
-      {me.hasVault && open && <SendPrivately confirmWithPasskey={confirmWithPasskey} />}
-      {me.hasVault && open && <Withdraw confirmWithPasskey={confirmWithPasskey} />}
-      {me.hasVault && open && <History />}
-      {me.hasVault && open && <TestFunds />}
-      {me.hasVault && open && <AddMoney />}
-
-      {atRisk && (
-        <section className="warning" role="alert">
-          <strong>You could lose access to your money.</strong> Your only passkey{relevant.length > 1 ? 's are' : ' is'} stored on a
-          single device. If you lose it, nobody (including Login) can recover your wallet. Add a passkey on another device, such as your
-          phone, that syncs with iCloud or Google.
-        </section>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
       )}
+    </>
+  );
 
-      <section className="card" aria-labelledby="pk-h">
-        <h2 id="pk-h">Passkeys</h2>
-        <ul className="passkeys">
-          {me.credentials.map((c) => (
-            <PasskeyRow
-              key={c.id}
-              c={c}
-              hasVault={me.hasVault}
-              disabled={busy}
-              walletOpen={open}
-              onRemove={() => run(async () => removePasskey(me, c.id))}
-              onConnect={() =>
-                run(async () => {
-                  const r = await connectPasskey(me, c.id);
-                  if (r === 'no-prf') setSignInOnly(c.id);
-                  else setNote(connectNote(r));
-                })
-              }
-            />
-          ))}
-        </ul>
-        <div className="add-passkey">
-          <p className="small">
-            <strong>Add a backup passkey.</strong> Put it somewhere other than this device, so losing one doesn’t lock you out.
-          </p>
-          <div className="row">
-            {(
-              [
-                ['phone', 'Add your phone', 'primary'],
-                ['security-key', 'Add a security key', ''],
-                ['any', 'Other options', 'link'],
-              ] as [PasskeyPlace, string, string][]
-            ).map(([place, label, cls]) => (
-              <button
-                key={place}
-                className={cls}
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    setSignInOnly(null);
-                    const r = await addPasskey(me, place);
-                    if (r.result === 'no-prf') setSignInOnly(r.credentialId);
-                    else setNote(connectNote(r.result));
-                  })
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {me.hasVault && !open && <p className="muted small">Unlock your wallet first so a new passkey can open it too.</p>}
-      </section>
+  return (
+    <>
+      {/* Outside the pages, so it keeps watching while you switch between them. */}
+      {me.hasVault && open && <ClaimWatcher />}
+      <Frame page={page} go={go} email={me.email} hidden={hidden} onToggleHidden={toggleHidden}>
+        {page === 'home' && (
+          <>
+            <h1 className="visually-hidden">Home</h1>
+            {atRisk && (
+              <section className="warning" role="alert">
+                <strong>You could lose access to your money.</strong> Your only passkey{relevant.length > 1 ? 's are' : ' is'}{' '}
+                stored on a single device. If you lose it, nobody (including Login) can recover your wallet. Add a passkey on
+                another device, such as your phone, that syncs with iCloud or Google.
+              </section>
+            )}
+            {me.hasVault && open ? (
+              <>
+                <PrivateBalance hidden={hidden} onSend={() => setSheet('send')} onReceive={() => setSheet('receive')} />
+                <BalanceChart />
+                <Activity title="Notifications" card limit={4} hidden={hidden} onViewAll={() => go('notifications')} />
+              </>
+            ) : (
+              <section className="panel locked" aria-labelledby="locked-h">
+                <h2 id="locked-h">{me.hasVault ? 'Your wallet is locked' : 'No wallet on this device yet'}</h2>
+                <p className="muted">
+                  {me.hasVault
+                    ? 'Unlock it with your passkey to see your private balance and activity. It locks after 15 minutes idle or when you close the tab.'
+                    : 'Set it up with your passkey to hold and send money privately.'}
+                </p>
+                {me.hasVault ? (
+                  <button className="cta" disabled={busy} onClick={() => run(async () => setNote(outcomeNote(await unlock(me))))}>
+                    Unlock with passkey
+                  </button>
+                ) : (
+                  <button
+                    className="cta"
+                    disabled={busy}
+                    onClick={() => run(async () => setNote(outcomeNote(await setUpWalletHere(me))))}
+                  >
+                    Set up wallet on this device
+                  </button>
+                )}
+              </section>
+            )}
+            {messages}
+            {/* Today's forms, until the Send and Receive pop-ups from Figma are built (next round). */}
+            <Modal open={sheet === 'send'} title="Send" onClose={() => setSheet(null)} wide>
+              <SendPrivately confirmWithPasskey={confirmWithPasskey} />
+              <Withdraw confirmWithPasskey={confirmWithPasskey} />
+            </Modal>
+            <Modal open={sheet === 'receive'} title="Receive" onClose={() => setSheet(null)} wide>
+              <AddMoney />
+            </Modal>
+          </>
+        )}
 
-      <KycCard onStatus={setKyc} />
-      <ConnectedApps refreshKey={kyc ? String(kyc.verifiedHuman) : ''} />
+        {page === 'notifications' && (
+          <>
+            <h1 className="page-title">Notifications</h1>
+            {me.hasVault && open ? (
+              <Activity title="Notifications" hideTitle limit={20} hidden={hidden} />
+            ) : (
+              <p className="muted">
+                Unlock your wallet on Home to see your activity. It’s worked out on this device and hidden while locked.
+              </p>
+            )}
+          </>
+        )}
 
-      {/* Only while that passkey still exists: it may have been removed from the list instead. */}
-      {signInOnly && me.credentials.some((c) => c.id === signInOnly) && (
-        <section className="warning" role="alert" aria-label="Sign-in only passkey">
-          <p>
-            <strong>This passkey can sign you in, but it can’t open your wallet.</strong> The place it’s stored (for example, this
-            browser’s own passkey storage) doesn’t support the feature Login uses to protect your wallet. So it is{' '}
-            <strong>not a backup for your money</strong>.
-          </p>
-          <div className="row">
-            <button onClick={() => (setSignInOnly(null), setNote('Kept for signing in only.'))}>Keep for signing in</button>
+        {page === 'verification' && (
+          <>
+            <h1 className="page-title">
+              Verification <span className="tag-sandbox">Sandbox</span>
+            </h1>
+            {kyc && (
+              <p data-testid="human-status">
+                {kyc.verifiedHuman ? (
+                  <span className="badge ok">Verified human{kyc.sandbox ? ' · test mode' : ''}</span>
+                ) : (
+                  <>
+                    <span className="badge">Not verified</span>{' '}
+                    <a
+                      href="#kyc-h"
+                      className="small"
+                      onClick={(e) => (
+                        e.preventDefault(),
+                        document.getElementById('kyc-h')?.scrollIntoView({ behavior: 'smooth' })
+                      )}
+                    >
+                      Verify you’re human
+                    </a>
+                  </>
+                )}
+              </p>
+            )}
+            <KycCard onStatus={setKyc} />
+          </>
+        )}
+
+        {page === 'settings' && (
+          <>
+            <h1 className="page-title">Settings</h1>
+            <section className="card" aria-labelledby="wallet-h">
+              <h2 id="wallet-h">Wallet</h2>
+              {!me.hasVault && (
+                <>
+                  <p>No wallet yet.</p>
+                  <button disabled={busy} onClick={() => run(async () => setNote(outcomeNote(await setUpWalletHere(me))))}>
+                    Set up wallet on this device
+                  </button>
+                </>
+              )}
+              {me.hasVault && open && (
+                <>
+                  <p>
+                    <span className="badge ok">Unlocked</span> Locks after 15 minutes idle or when you close the tab.
+                  </p>
+                  {fp && (
+                    <p className="muted small">
+                      Wallet check: <code>{fp}</code>. Every passkey should show the same value.
+                    </p>
+                  )}
+                  <div className="row">
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        run(async () => {
+                          const o = await unlock(me);
+                          setNote(
+                            o.kind === 'opened' ? 'Confirmed with your passkey. (Test only: nothing was sent.)' : outcomeNote(o),
+                          );
+                        })
+                      }
+                    >
+                      Confirm a test send
+                    </button>
+                    <button onClick={() => wallet.lock()}>Lock</button>
+                  </div>
+                </>
+              )}
+              {me.hasVault && !open && (
+                <>
+                  <p>
+                    <span className="badge">Locked</span>
+                  </p>
+                  <button
+                    className="primary"
+                    disabled={busy}
+                    onClick={() => run(async () => setNote(outcomeNote(await unlock(me))))}
+                  >
+                    Unlock with passkey
+                  </button>
+                </>
+              )}
+            </section>
+            {atRisk && (
+              <section className="warning" role="alert">
+                <strong>You could lose access to your money.</strong> Your only passkey{relevant.length > 1 ? 's are' : ' is'}{' '}
+                stored on a single device. If you lose it, nobody (including Login) can recover your wallet. Add a passkey on
+                another device, such as your phone, that syncs with iCloud or Google.
+              </section>
+            )}
+            <section className="card" aria-labelledby="pk-h">
+              <h2 id="pk-h">Passkeys</h2>
+              <ul className="passkeys">
+                {me.credentials.map((c) => (
+                  <PasskeyRow
+                    key={c.id}
+                    c={c}
+                    hasVault={me.hasVault}
+                    disabled={busy}
+                    walletOpen={open}
+                    onRemove={() => run(async () => removePasskey(me, c.id))}
+                    onConnect={() =>
+                      run(async () => {
+                        const r = await connectPasskey(me, c.id);
+                        if (r === 'no-prf') setSignInOnly(c.id);
+                        else setNote(connectNote(r));
+                      })
+                    }
+                  />
+                ))}
+              </ul>
+              <div className="add-passkey">
+                <p className="small">
+                  <strong>Add a backup passkey.</strong> Put it somewhere other than this device, so losing one doesn’t lock you
+                  out.
+                </p>
+                <div className="row">
+                  {(
+                    [
+                      ['phone', 'Add your phone', 'primary'],
+                      ['security-key', 'Add a security key', ''],
+                      ['any', 'Other options', 'link'],
+                    ] as [PasskeyPlace, string, string][]
+                  ).map(([place, label, cls]) => (
+                    <button
+                      key={place}
+                      className={cls}
+                      disabled={busy}
+                      onClick={() =>
+                        run(async () => {
+                          setSignInOnly(null);
+                          const r = await addPasskey(me, place);
+                          if (r.result === 'no-prf') setSignInOnly(r.credentialId);
+                          else setNote(connectNote(r.result));
+                        })
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {me.hasVault && !open && <p className="muted small">Unlock your wallet first so a new passkey can open it too.</p>}
+            </section>
+            <ConnectedApps refreshKey={kyc ? String(kyc.verifiedHuman) : ''} />
+            {/* Only while that passkey still exists: it may have been removed from the list instead. */}
+            {signInOnly && me.credentials.some((c) => c.id === signInOnly) && (
+              <section className="warning" role="alert" aria-label="Sign-in only passkey">
+                <p>
+                  <strong>This passkey can sign you in, but it can’t open your wallet.</strong> The place it’s stored (for
+                  example, this browser’s own passkey storage) doesn’t support the feature Login uses to protect your wallet. So
+                  it is <strong>not a backup for your money</strong>.
+                </p>
+                <div className="row">
+                  <button onClick={() => (setSignInOnly(null), setNote('Kept for signing in only.'))}>Keep for signing in</button>
+                  <button
+                    className="danger"
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        await removePasskey(me, signInOnly);
+                        setSignInOnly(null);
+                        setNote('Removed. Try adding one on your phone or with a security key instead.');
+                      })
+                    }
+                  >
+                    Remove it
+                  </button>
+                </div>
+              </section>
+            )}
+            {messages}
             <button
-              className="danger"
-              disabled={busy}
-              onClick={() =>
-                run(async () => {
-                  await removePasskey(me, signInOnly);
-                  setSignInOnly(null);
-                  setNote('Removed. Try adding one on your phone or with a security key instead.');
-                })
-              }
+              className="link"
+              onClick={async () => {
+                wallet.lock();
+                await api('POST', '/api/logout');
+                await refresh();
+              }}
             >
-              Remove it
+              Sign out
             </button>
-          </div>
-        </section>
-      )}
-
-      {note && <p className="info" role="status">{note}</p>}
-      {error && <p className="error" role="alert">{error}</p>}
-
-      <button
-        className="link"
-        onClick={async () => {
-          wallet.lock();
-          await api('POST', '/api/logout');
-          await refresh();
-        }}
-      >
-        Sign out
-      </button>
-    </Shell>
+          </>
+        )}
+      </Frame>
+    </>
   );
 }
 
@@ -1100,7 +1280,9 @@ function DevOutbox() {
       <ul className="outbox">
         {emails?.map((e) => (
           <li key={e.sentAt + e.to}>
-            <div className="muted small">{new Date(e.sentAt).toLocaleTimeString()} · to {e.to}</div>
+            <div className="muted small">
+              {new Date(e.sentAt).toLocaleTimeString()} · to {e.to}
+            </div>
             <strong>{e.subject}</strong>
             <p>{e.body}</p>
           </li>

@@ -47,8 +47,9 @@ test('passkey sign-in to OIDC: consent, pairwise IDs, fresh authentication and l
   await page.getByRole('heading', { name: 'Signed in to the chess demo' }).waitFor();
   assert.ok(first === (await page.locator('code').textContent()));
   // The account page lists both apps and what they see, and shows "Not verified" at the top.
-  await page.goto('http://localhost:5180');
+  await page.goto('http://localhost:5180/#verification');
   await page.getByTestId('human-status').getByText('Not verified').waitFor();
+  await page.goto('http://localhost:5180/#settings');
   const apps = page.getByTestId('connected-apps');
   await apps.getByText('Chess demo').waitFor();
   await apps.getByText('Second demo app').waitFor();

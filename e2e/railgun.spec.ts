@@ -4,7 +4,7 @@
  * TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, recordSecrets, signUp } from './helpers.ts';
+import { Device, disableAutofill, recordSecrets, signUp, goTo } from './helpers.ts';
 
 test.describe.configure({ timeout: 5 * 60_000 });
 
@@ -62,7 +62,9 @@ test('same passkey, same Railgun address after locking and unlocking', async ({ 
   await expect(address).toHaveText(/^0zk/, { timeout: 120_000 });
   const first = await address.getAttribute('title');
 
+  await goTo(page, 'Settings');
   await page.getByRole('button', { name: 'Lock' }).click();
+  await goTo(page, 'Home');
   await expect(card).toHaveCount(0); // worker terminated, nothing shown while locked
   await page.getByRole('button', { name: 'Unlock with passkey' }).click();
   await expect(address).toHaveText(/^0zk/, { timeout: 120_000 });

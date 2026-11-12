@@ -7,7 +7,7 @@
 import { expect, test } from '@playwright/test';
 import { generateKeyPairSync } from 'node:crypto';
 import { Contract, JsonRpcProvider, Wallet, encodeBase58, parseUnits } from 'ethers';
-import { Device, disableAutofill, recordSecrets, signUp } from './helpers.ts';
+import { Device, disableAutofill, openSheet, recordSecrets, signUp } from './helpers.ts';
 
 const RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const TIDEPOOL = 'https://www.usetidepool.tech';
@@ -56,6 +56,7 @@ test('EVM: ETH and USDC sent to one address → swapped through Tidepool → pri
   await expect.poll(async () => ((await usdc.balanceOf!(sender.address)) as bigint) >= parseUnits('1', 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
 
   // Add money → From an Ethereum wallet: one address, no token or amount to pick.
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
   const add = page.getByRole('region', { name: /Add money/ });
   await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
@@ -100,6 +101,7 @@ test('EVM: USDT sent to the address goes straight in, no swap', async ({ page })
   await expect.poll(async () => (await provider.getBalance(sender.address)) > 0n, { timeout: 180_000, intervals: [5_000] }).toBe(true);
   await expect.poll(async () => ((await usdt.balanceOf!(sender.address)) as bigint) >= parseUnits('2', 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
 
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
   const add = page.getByRole('region', { name: /Add money/ });
   await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
@@ -115,6 +117,7 @@ test('EVM: USDT sent to the address goes straight in, no swap', async ({ page })
 test('Solana devnet: asks for a refund address, then gets a Solana deposit address', async ({ page }) => {
   await Device.add(page);
   await signUp(page);
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
   const add = page.getByRole('region', { name: /Add money/ });
   await add.getByRole('button', { name: 'From Solana' }).click({ timeout: 240_000 });
   await add.getByLabel('Send from').selectOption({ label: 'USDC on Solana devnet' }, { timeout: 60_000 });
@@ -150,6 +153,7 @@ test('EVM: more ETH than Tidepool takes in one swap (0.006) is split into severa
     await expect.poll(async () => (await provider.getBalance(s.address)) >= parseUnits('0.004', 18), { timeout: 180_000, intervals: [5_000] }).toBe(true);
   }
 
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
   const add = page.getByRole('region', { name: /Add money/ });
   await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();

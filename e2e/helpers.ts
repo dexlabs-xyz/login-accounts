@@ -96,16 +96,33 @@ export async function verifyEmail(page: Page, email: string) {
 
 export async function signUp(page: Page, email = freshEmail()) {
   await verifyEmail(page, email);
-  await expect(page.getByRole('heading', { name: 'Your account' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
   return email;
 }
 
+/** The signed-in pages (sidebar on desktop). The hash keeps the page across reloads and sign-in. */
+export async function goTo(page: Page, name: 'Home' | 'Notifications' | 'Verification' | 'Settings') {
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name, exact: true }).click();
+}
+
+/** Home's Send / Receive pop-ups (they hold the Send privately, Withdraw and Add money forms). */
+export async function openSheet(page: Page, name: 'Send' | 'Receive') {
+  await goTo(page, 'Home');
+  await page.getByRole('button', { name, exact: true }).click();
+  return page.getByRole('dialog', { name });
+}
+export async function closeSheet(page: Page) {
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+}
+
 export async function walletCheck(page: Page): Promise<string> {
+  await goTo(page, 'Settings');
   const text = await page.getByText('Wallet check:').locator('code').textContent();
   return text!.trim();
 }
 
 export async function signOut(page: Page) {
+  await goTo(page, 'Settings');
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('heading', { name: 'Welcome' })).toBeVisible();
 }

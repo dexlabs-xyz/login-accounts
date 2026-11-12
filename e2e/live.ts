@@ -1,7 +1,7 @@
 /** Shared setup for live Sepolia tests (send, withdraw). TESTNET ONLY. */
 import { expect, type Page } from '@playwright/test';
 import { JsonRpcProvider, Wallet, parseEther } from 'ethers';
-import { Device, disableAutofill, signUp } from './helpers.ts';
+import { closeSheet, Device, disableAutofill, openSheet, signUp } from './helpers.ts';
 
 export const RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 export const TIDEPOOL = 'https://www.usetidepool.tech';
@@ -40,14 +40,15 @@ export async function fundedAccount(page: Page, say: (m: string) => void) {
   const card = page.getByRole('region', { name: /Private balance/ });
   await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
 
-  const funds = page.getByRole('region', { name: /Test funds/ });
+  // "Test USDT" on Home; its updates arrive as toasts (testfunds-status).
+  const funds = page;
   // A freshly started local server needs a few minutes to open the pool ("still starting"): retry.
   await expect
     .poll(
       async () => {
         await page.keyboard.press('Shift'); // stay "active" (15-minute idle lock)
         if (await funds.getByTestId('testfunds-status').isVisible()) return true;
-        const button = funds.getByRole('button', { name: /^Get \d+ test USDT/ });
+        const button = page.getByRole('button', { name: 'Test USDT', exact: true });
         if (await button.isEnabled().catch(() => false)) await button.click();
         await page.waitForTimeout(3_000);
         return funds.getByTestId('testfunds-status').isVisible();
@@ -64,6 +65,7 @@ export async function fundedAccount(page: Page, say: (m: string) => void) {
   expect(gas.ok()).toBe(true);
   await expect.poll(async () => (await provider.getBalance(funder.address)) >= parseEther('0.0035'), { timeout: 180_000, intervals: [5_000] }).toBe(true);
 
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
   const add = page.getByRole('region', { name: /Add money/ });
   await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
   const depositTo = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
@@ -79,6 +81,7 @@ export async function fundedAccount(page: Page, say: (m: string) => void) {
     }
   }
   await watch(page, 'active-deposit-status', /^Done\./, 20 * 60_000, say);
+  await closeSheet(page);
 
   // Measured on Sepolia, 5 Nov 2026: fresh shields took 52, 74 and over 90 minutes to clear.
   // The wallet locks after 15 minutes idle (D5), so act like a user who's still here,

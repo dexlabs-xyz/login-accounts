@@ -3,6 +3,7 @@
  * Railgun broadcaster. Slow (deposit + privacy check + proof). TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
+import { openSheet } from './helpers.ts';
 import { Contract, Wallet, parseUnits } from 'ethers';
 import { ERC20, SEPOLIA_USDT, fundedAccount, log, provider, watch } from './live.ts';
 
@@ -11,6 +12,7 @@ const say = log('withdraw');
 
 test('withdraws USDT to a public address; refuses own deposit addresses; flags the funding wallet', async ({ page }) => {
   const { depositTo, funder } = await fundedAccount(page, say);
+  await openSheet(page, 'Send'); // Withdraw sits in the Send pop-up until it's redesigned
   const panel = page.getByRole('region', { name: /^Withdraw/ });
   const toField = panel.getByLabel('To (public 0x address on Ethereum Sepolia)');
 

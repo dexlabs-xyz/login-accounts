@@ -5,6 +5,7 @@
  * (deposit + privacy check + proofs). TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
+import { openSheet } from './helpers.ts';
 import { Contract, JsonRpcProvider, Wallet } from 'ethers';
 import { ERC20, fundedAccount, log, provider, watch } from './live.ts';
 
@@ -19,6 +20,7 @@ const SOL_RECIPIENT = '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin';
 
 test('withdraws through NEAR Intents (default: USDC on Solana, then ETH on Sepolia); refuses ETH over Tidepool’s cap', async ({ page }) => {
   const { funder } = await fundedAccount(page, say);
+  await openSheet(page, 'Send'); // Withdraw sits in the Send pop-up until it's redesigned
   const panel = page.getByRole('region', { name: /^Withdraw/ });
   const receiveAs = panel.getByTestId('withdraw-receive-as');
   const amount = panel.getByLabel('Amount (USDT)');

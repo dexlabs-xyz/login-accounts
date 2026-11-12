@@ -6,7 +6,10 @@ changes **how things look and move**, not what they do or say about safety.
 
 ## Where the UI lives
 
-- `apps/web/src/App.tsx`: shell, sign-up/sign-in, account page, private balance card.
+- `apps/web/src/App.tsx`: sign-up/sign-in (Welcome, email code), the signed-in pages, private balance.
+- `apps/web/src/home/`: the signed-in frame (sidebar, divider, pages in the URL hash: `#notifications`,
+  `#verification`, `#settings`; Home has none), the Balance History chart, the Copy address button.
+- `apps/web/src/ui/`: `toast.tsx` (Sonner), `Modal.tsx` (the Send/Receive pop-ups, a `<dialog>`), `motion.ts`.
 - `apps/web/src/deposits/AddMoney.tsx`: "Add money" (Ethereum wallet, Solana).
 - `apps/web/src/send/SendPrivately.tsx`: "Send privately" and "Withdraw".
 - `apps/web/src/TestFunds.tsx`, `Kyc.tsx` (Verification, KYC team's), `ConnectedApps.tsx`,
@@ -21,8 +24,9 @@ changes **how things look and move**, not what they do or say about safety.
   records) and `apps/web/src/deposits/flow.ts`, `tidepool.ts`, `plan.ts`.
   They hold keys and money logic and were tested live.
 - `apps/server/` beyond styling the consent page, `AGENTS.md`, `.internal/`.
-- New dependencies: ask Gold first (animation libraries included; CSS
-  transitions and the Web Animations API need none). Never add crypto or auth packages.
+- New dependencies: ask Gold first. Approved 12 Nov and pinned: `motion` 14.7.1 (motion.dev, MIT, the free
+  version only: no paid Motion+ code in this public repo) and `sonner` 2.0.8 (toasts, MIT). Never add crypto or
+  auth packages.
 - The Sumsub SDK must keep loading only after the user presses Continue (Kyc.tsx).
 
 ## Keep (tests and trust depend on them)
@@ -33,19 +37,25 @@ test in the same change and say so:
 
 - **Test ids:** `private-empty`, `balance-Spendable-usdt` (pattern
   `balance-<Bucket>-<token>`), `fee-reserve-ready` / `fee-reserve-pending` /
-  `fee-reserve-empty`, `testfunds-status`, `tidepool-deposit-address`,
+  `fee-reserve-empty` (`private-empty` and `fee-reserve-empty` are screen-reader-only text now: Gold removed
+  them from view), `testfunds-status` and `testfunds-privacy` (on the Test USDT toasts), `tidepool-deposit-address`,
   `active-deposit-status`, `mainnet-price`, `unshield-status`,
   `withdraw-receives`, `withdraw-swap-receives`, `withdraw-receive-as`,
   `withdraw-linked-warning`, `human-status`, `connected-apps`, `history`.
-- **Regions (a `section` with an `h2` via `aria-labelledby`):** Private balance,
-  Add money, Test funds, Send privately, Withdraw, Verification, History.
-- **Headings:** "Sign up or sign in", "Your account", "Confirm it’s you",
+- **Regions (a `section` with an `h2` via `aria-labelledby`):** Private balance (Home),
+  Notifications (Home's card and the Notifications page; was History), Verification (Verification page);
+  Send privately and Withdraw inside the **Send** pop-up, Add money inside the **Receive** pop-up, until those
+  pop-ups are redesigned. Test funds is now the **Test USDT** button on Home. e2e helpers: `goTo(page, 'Settings')`,
+  `openSheet(page, 'Send' | 'Receive')`, `closeSheet(page)`.
+- **Headings:** "Welcome" (was "Sign up or sign in"), "Home" (screen-reader only; was "Your account"),
+  "Check your email" (code step), "Notifications", "Verification", "Settings", "Confirm it’s you",
   "Sign in to continue", "This sign-in link doesn’t work", "Sign-in did not complete".
-- **Buttons/links (exact names):** Continue, Verify, Sign in with passkey,
+- **Buttons/links (exact names):** Continue, Sign in with passkey, Go back, Resend code, Test USDT, Send, Receive,
+  Copy address (the email code is sent on the sixth digit: there's no Verify button any more),
   Unlock with passkey, Lock, Sign out, Add your phone, Add a security key,
   Other options, Connect, Remove, Remove it, Keep for signing in, Retry sync,
   Review, Back, Confirm with passkey, Withdraw again, Get deposit address,
-  From an Ethereum wallet, From Solana, "Get 250 test USDT…", "Verify you’re human…",
+  From an Ethereum wallet, From Solana, "Verify you’re human…",
   Allow and continue, Cancel and go back to the app, View on Sepolia Etherscan.
 - **Labels:** Email, 6-digit code, Amount (USDT), Amount, Send from,
   "To (private 0zk address)", "To (public 0x address on Ethereum Sepolia)",
@@ -53,9 +63,11 @@ test in the same change and say so:
 - **Status text the tests read:** "Sent …", "Done. …", "Withdrew …",
   "Done: about …", "Not verified", "Waiting for privacy check" and the other
   balance labels, the error messages in `SendPrivately.tsx` and `AddMoney.tsx`.
-- **Trust labels that must stay visible:** "Testnet", "Sandbox (test mode)",
+- **Trust labels that must stay visible:** "Testnet" (on the Send/Receive forms), "Sandbox (test mode)",
   "Unaudited", the public-address warnings on Withdraw and Add money,
-  History's "Only you see this…" note,
+  History's "Only you see this…" note (Notifications page), the Test USDT privacy toast,
+  (Gold, 12 Nov: disclosures are well timed, not repeated; "Testnet build. Never use real funds." and the
+  claim note under each History row were removed on purpose)
   "Tidepool sees the address…", "No app sees your email…". These are honesty
   commitments, not decoration.
 - Accessibility: keep `role="status"` / `role="alert"` on live messages, real

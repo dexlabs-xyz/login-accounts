@@ -5,7 +5,7 @@
  * Needs Sumsub sandbox keys in .env (KYC on).
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, recordSecrets, signUp } from './helpers.ts';
+import { Device, disableAutofill, recordSecrets, signUp, goTo } from './helpers.ts';
 
 test.describe.configure({ timeout: 10 * 60_000 });
 
@@ -16,6 +16,7 @@ test('no secret leaves the device while the Sumsub KYC flow runs (D6)', async ({
   await signUp(page);
   await expect(page.getByRole('region', { name: /Private balance/ }).getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
 
+  await goTo(page, 'Verification');
   const kyc = page.getByRole('region', { name: 'Verification' });
   await expect(kyc.getByText(/^Sandbox \(test mode\)/)).toBeVisible({ timeout: 30_000 }); // KYC is on
   await kyc.getByRole('button', { name: /Verify you’re human/ }).click();
