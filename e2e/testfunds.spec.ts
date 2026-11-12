@@ -16,7 +16,7 @@ test('a new account claims 250 test USDT once; it becomes spendable', async ({ p
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 
   // "Test USDT" on Home; every update about the top-up arrives as a toast (testfunds-status).
   const funds = page;

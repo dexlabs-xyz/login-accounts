@@ -15,7 +15,7 @@ test('a second account in the same browser loads its wallet', async ({ page }) =
 
   // Account A saves a deposit record (an Ethereum deposit address).
   await signUp(page);
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
   await openSheet(page, 'Receive');
   await addMoney.getByRole('button', { name: 'From an Ethereum wallet' }).click();
   await expect(addMoney.locator('code.address').first()).toHaveText(/^0x/, { timeout: 60_000 });
@@ -25,6 +25,6 @@ test('a second account in the same browser loads its wallet', async ({ page }) =
 
   // Account B, same browser.
   await signUp(page);
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
   await expect(page.getByText('Couldn’t load your private balance')).toHaveCount(0);
 });

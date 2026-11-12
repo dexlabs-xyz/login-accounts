@@ -38,7 +38,7 @@ export async function fundedAccount(page: Page, say: (m: string) => void) {
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 
   // "Test USDT" on Home; its updates arrive as toasts (testfunds-status).
   const funds = page;

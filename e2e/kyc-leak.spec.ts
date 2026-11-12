@@ -14,7 +14,7 @@ test('no secret leaves the device while the Sumsub KYC flow runs (D6)', async ({
   const leaks = await recordSecrets(page);
   await Device.add(page);
   await signUp(page);
-  await expect(page.getByRole('region', { name: /Private balance/ }).getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(page.getByRole('region', { name: /Private balance/ }).getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 
   await goTo(page, 'Verification');
   const kyc = page.getByRole('region', { name: 'Verification' });

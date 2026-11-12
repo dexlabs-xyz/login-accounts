@@ -45,7 +45,7 @@ test('EVM: ETH and USDC sent to one address → swapped through Tidepool → pri
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
   await expect(card.getByTestId('fee-reserve-empty')).toBeVisible();
 
   // The sending wallet: ETH from our testnet faucet, test USDC from Tidepool's faucet.
@@ -94,7 +94,7 @@ test('EVM: USDT sent to the address goes straight in, no swap', async ({ page })
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 
   expect((await page.request.post('/api/testnet-gas', { data: { address: sender.address } })).ok()).toBe(true);
   expect((await page.request.post(`${TIDEPOOL}/v0/faucet`, { data: { chain: 'eth', address: sender.address } })).ok()).toBe(true);
@@ -144,7 +144,7 @@ test('EVM: more ETH than Tidepool takes in one swap (0.006) is split into severa
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 
   // Three throwaway senders, each with 0.004 ETH from our testnet faucet (testnet only).
   const senders = [0, 1, 2].map(() => Wallet.createRandom().connect(provider));
