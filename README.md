@@ -94,6 +94,10 @@ wallet secret, your private address or your balance. Browser tests record every
 secret and check that none of them appears in any network request or storage,
 including while the Sumsub SDK runs.
 
+Your history (Notifications) is worked out on your device from your wallet's
+own data and shown only while your wallet is unlocked; Login's server never
+sees it.
+
 ### What's simulated or special on testnet (labelled)
 
 These exist only because this is a testnet demo, and contradict the privacy
