@@ -398,6 +398,28 @@ function Shell({ children }: { children: React.ReactNode }) {
 /** "Learn more about what this is." Points at the README until the demo post is published (Gold, 11 Nov). */
 const LEARN_MORE_URL = 'https://github.com/dexlabs-xyz/login-accounts#readme';
 
+/**
+ * The email field's green tick and red cross (Figma's Check/X Circled). Drawn inline so the mark follows the theme:
+ * black in dark mode, white in light, like the text on the blue buttons (Gold, 13 Nov).
+ */
+function StatusIcon({ kind, className }: { kind: 'ok' | 'bad'; className?: string }) {
+  return (
+    <svg className={className} width={24} height={24} viewBox="0 0 24.0519 24.0519" fill="none" aria-hidden="true" style={{ display: 'block' }}>
+      <path
+        d="M12.0245 1.41129C17.8892 1.41133 22.6443 6.16583 22.6447 12.0304C22.6447 17.8953 17.8894 22.6505 12.0245 22.6505C6.15976 22.6503 1.4054 17.8952 1.4054 12.0304C1.40578 6.16593 6.16 1.41149 12.0245 1.41129Z"
+        fill={kind === 'ok' ? '#22C55E' : '#DC2626'}
+      />
+      <path
+        d={kind === 'ok' ? 'M15.6336 8.41811L10.556 15.6337L8.0172 13.0479' : 'M15.2 8.85L8.85 15.2M8.85 8.85L15.2 15.2'}
+        stroke="var(--on-accent)"
+        strokeWidth={1.60346}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Format check only, in the browser. Never asks the server whether an address has an account (no account probing). */
 const EMAIL_FORMAT = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
 /** The spinner shows for 2 s after typing pauses before the result (Gold: an instant result felt abrupt). */
@@ -745,7 +767,7 @@ function Join({
     check === 'checking' ? (
       <img className="field-icon" src="/img/loader-spinning.svg" alt="" width={24} height={24} />
     ) : check === 'valid' ? (
-      <img className="field-icon pop" src="/img/check-circled.svg" alt="" width={24} height={24} />
+      <StatusIcon kind="ok" className="field-icon pop" />
     ) : check === 'invalid' ? (
       <button
         type="button"
@@ -756,7 +778,7 @@ function Join({
           emailInput.current?.focus();
         }}
       >
-        <img src="/img/x-circled.svg" alt="" width={24} height={24} />
+        <StatusIcon kind="bad" />
       </button>
     ) : null;
 
