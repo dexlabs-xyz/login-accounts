@@ -77,6 +77,58 @@ below), so a new account can try one of step 5 or step 6 after the test funds.
 Everything moves in one currency on screen: USDT. Every send and withdrawal is
 confirmed with your passkey after a summary.
 
+## Why it's built this way
+
+Each choice below solves a specific problem. The full reasoning, with
+alternatives we rejected, is in [docs/design/passkeys.md](docs/design/passkeys.md)
+(decisions D1–D9).
+
+- **Passkeys, not passwords or seed phrases.** Most people lose seed phrases
+  or reuse passwords. A passkey is phishing-resistant, and it's already backed
+  up by iCloud or Google. *No password fallback* (D7): an encrypted backup
+  protected by a password can be brute-forced offline by whoever holds it.
+- **The passkey never signs on a blockchain; it unlocks one secret.** Through
+  the WebAuthn PRF extension, each passkey produces a stable secret that only
+  it can make. That secret unwraps the account's one root secret, from which
+  the Railgun wallet and the deposit addresses are derived. *Why:* one login
+  works for every chain, and adding or removing a device never touches the
+  money (D1).
+- **The server can't open wallets, even if breached (D6).** It stores only
+  your email, passkey public keys and encrypted data. *Why:* a custodial
+  database is the biggest prize for an attacker; here there's nothing to steal
+  that opens funds. Browser tests check that no secret ever leaves the device.
+- **The email code never signs anyone in (D2).** It only proves the address
+  during sign-up. *Why:* taking over someone's email shouldn't take over their
+  money.
+- **Railgun for privacy.** Railgun keeps balances, senders and recipients
+  private on Ethereum, with proofs made in the user's browser. *Why:* it's an
+  established, audited protocol on the chain where stablecoins live; we don't
+  invent our own cryptography.
+- **Broadcasters submit private transactions.** *Why:* if the user paid gas
+  from a public address, that address would link them to their private
+  activity.
+- **NEAR Intents for anything in, anything out.** Deposits in any supported
+  token or chain become private USDT; withdrawals can leave as another token
+  or chain. *Why:* the user shouldn't need to know about bridges, routes or
+  which chain a friend uses. Intents let a solver handle it in one step, with
+  a refund if it can't be done.
+- **One currency on screen (USDT).** *Why:* people think in dollars, not in
+  a mix of tokens and gas coins.
+- **Every withdrawal warns that it's public**, and flags an address that sent
+  money in. *Why:* a withdrawal to your own funding wallet would link the two
+  in public; users should see that before they confirm.
+- **"Continue with Login" gives each app a different ID and never your
+  email.** *Why:* apps (or a data broker joining their databases) can't
+  follow you across sites. Apps learn only what the consent screen says, such
+  as "verified human".
+- **KYC stores only the result, never documents.** *Why:* a breach can't leak
+  ID scans, and apps get a yes/no instead of personal data.
+- **Testnet, with every exception labelled.** NEAR Intents has no official
+  testnet, so swaps use Tidepool (a community testnet with the same API), and
+  mainnet is only asked for read-only prices. *Why:* this build never touches
+  real money, and anything that bends the privacy rule for testing is listed
+  below and must not reach mainnet.
+
 ## How it works
 
 | Piece | What it does |
