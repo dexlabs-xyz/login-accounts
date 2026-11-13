@@ -16,7 +16,7 @@ PKCE, issuer validation, shared-session checks, cookie policy and existing conse
 origin/cancellation protections are unchanged. Connected apps identify grants
 that permit level sharing.
 
-Deploy this Login API change before the companion Chess change. Existing players
+Deploy this Login API and frontend change before the companion Chess change. Existing players
 can then use Chess's Refresh verification action to obtain a current assertion;
 old stored Chess sessions are not upgraded to a guessed level. No environment
 variables, dependency versions, signing keys or passkey settings change. All
