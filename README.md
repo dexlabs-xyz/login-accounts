@@ -8,7 +8,34 @@ chains, built on **NEAR Intents** and **Railgun**.
 - **Live demo:** https://demo.withlogin.com (Sepolia testnet)
 - **Design decisions:** [docs/design/passkeys.md](docs/design/passkeys.md)
 
-<!-- TODO(Gold): the one-paragraph concept explanation goes here, from Gold's write-up. -->
+## Why Login
+
+When AI can imitate anything a person writes, says or shows, a login that
+only proves "someone knows this password" stops meaning much. We think the
+login that lasts proves **a real human is behind the account**, once, and
+lets that proof travel with what the person does online.
+
+We anchor it on two things AI can't easily manufacture:
+
+- **Money.** It's scarce, and every person moves it. Even in an "agent
+  economy", agents move money on behalf of people; they don't create it.
+- **Identity documents.** Every person has them, and they're still hard to
+  fake at scale.
+
+So Login is one account that:
+
+1. **signs you in anywhere** with a passkey: no password, no seed phrase
+   *(built)*;
+2. **moves money privately, across chains and borders**: Railgun for
+   privacy, NEAR Intents for any token on any chain *(built, testnet)*;
+3. **proves you're human** to the apps you choose without handing over your
+   identity: Sumsub KYC, shared only as "verified human" *(built, Sumsub
+   sandbox)*;
+4. later, **lets apps prove content came from a verified human** *(next, not
+   built)*.
+
+This hackathon build is the first step: identity and money in one private
+account.
 
 ## Try it in 5 minutes
 
