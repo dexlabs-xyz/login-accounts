@@ -151,6 +151,16 @@ export function splitIntoPieces(total: bigint, count: number, step: bigint): big
   return pieces;
 }
 
+/**
+ * TESTNET ONLY. `count` pieces of at least `base`, each `step` more than the last (base, base+step, …), so no two
+ * are identical and none is below `base`. Railgun spends the smallest pieces first until the amount is covered, so
+ * with every piece at least $10 a send of $10 or less uses exactly one (team lead, 13 Nov: the demo sends $10 at a
+ * time). A piece spread below $10 would make a $10 send take two.
+ */
+export function piecesFrom(base: bigint, count: number, step: bigint): bigint[] {
+  return Array.from({ length: count }, (_, i) => base + BigInt(i) * step);
+}
+
 /** What the pool pays for these pieces: each is a separate shield, and Railgun takes its fee from each one. */
 export const grossForPieces = (pieces: readonly bigint[], feeBasisPoints: bigint) =>
   pieces.reduce((t, p) => t + grossForShield(p, feeBasisPoints), 0n);

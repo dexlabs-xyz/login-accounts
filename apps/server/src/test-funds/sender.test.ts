@@ -1,6 +1,6 @@
 /** TESTNET-ONLY test funds: the shield-fee gross-up and the "can the pool pay?" rule. */
 import { describe, expect, it } from 'vitest';
-import { grossForPieces, grossForShield, splitIntoPieces } from './pool.ts';
+import { grossForPieces, grossForShield, piecesFrom, splitIntoPieces } from './pool.ts';
 import { canPayClaim, CLAIM_FEE_RESERVE_WEI, CLAIM_PIECES, CLAIM_USDT, CLAIM_USDT_PIECES, CLAIM_WETH_PIECES } from './sender.ts';
 
 const ETH = 10n ** 18n;
@@ -44,9 +44,15 @@ describe('canPayClaim', () => {
 });
 
 describe('claim pieces (one transaction each on Sepolia)', () => {
-  it('250 USDT is 5 different pieces of about 50 that add up exactly', () => {
-    expect(CLAIM_USDT_PIECES).toEqual([49_980_000n, 49_990_000n, 50_000_000n, 50_010_000n, 50_020_000n]);
-    expect(CLAIM_USDT_PIECES.reduce((a, b) => a + b, 0n)).toBe(CLAIM_USDT);
+  it('250 USDT is 25 different pieces, none below 10, so a 10 USDT send uses exactly one', () => {
+    expect(CLAIM_USDT_PIECES).toHaveLength(25);
+    expect(new Set(CLAIM_USDT_PIECES).size).toBe(25);
+    expect(CLAIM_USDT_PIECES.every((p) => p >= 10_000_000n && p < 10_000_100n)).toBe(true);
+    const total = CLAIM_USDT_PIECES.reduce((a, b) => a + b, 0n);
+    expect(total - CLAIM_USDT).toBe(300n); // 250.0003 USDT, shown as $250
+  });
+  it('piecesFrom counts up from the base', () => {
+    expect(piecesFrom(10n, 3, 1n)).toEqual([10n, 11n, 12n]);
   });
   it('the fee reserve is 5 different pieces that add up to 0.001 ETH', () => {
     expect(CLAIM_WETH_PIECES).toHaveLength(CLAIM_PIECES);

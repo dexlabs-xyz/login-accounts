@@ -2,7 +2,7 @@
  * TESTNET ONLY. Sends one claim from the pool: a single shield from the pool's
  * public address straight into the claimer's 0zk address, of 250 test USDT
  * plus 0.001 ETH as WETH (the claimer's hidden network-fee reserve), each in
- * 5 pieces (CLAIM_PIECES). Railgun's
+ * 25 pieces (CLAIM_PIECES). Railgun's
  * shield fee is added on top, so the claimer receives exactly these amounts.
  *
  * Why a shield and not a private transfer (team decision, 8 Nov 2026): a
@@ -23,17 +23,18 @@ import {
   refreshSpentPOIsForWallet,
   validateRailgunAddress,
 } from '@railgun-community/wallet';
-import { grossForPieces, NETWORK, openPool, publicBalances, shieldClaim, splitIntoPieces, V2, type Pool } from './pool.ts';
+import { grossForPieces, NETWORK, openPool, piecesFrom, publicBalances, shieldClaim, splitIntoPieces, V2, type Pool } from './pool.ts';
 
 export const CLAIM_USDT = 250n * 1_000_000n; // 250 test USDT (team decision, 8 Nov; was 1,000)
 export const CLAIM_FEE_RESERVE_WEI = 1_000_000_000_000_000n; // 0.001 ETH, as private WETH
 /**
- * In 5 pieces of about 50 USDT, each with its own fee piece of about 0.0002 ETH (team lead, 13 Nov), so one claim
- * pays for about 5 sends or withdrawals on Sepolia instead of 1 (see splitIntoPieces). A send of up to 50 uses one
- * piece; a bigger one uses as many as it needs.
+ * In 25 pieces of 10 USDT (10.000000, 10.000001, … 10.000024), each with its own fee piece of 0.00004 ETH (team
+ * lead, 13 Nov, for the demo: was 5 × 50), so one claim pays for 25 sends or withdrawals of up to 10 USDT on Sepolia
+ * instead of 1 (see splitIntoPieces). A bigger send uses as many pieces as it needs (up to about 13 at once).
+ * In all 250.0003 USDT, shown as $250.
  */
-export const CLAIM_PIECES = 5;
-export const CLAIM_USDT_PIECES = splitIntoPieces(CLAIM_USDT, CLAIM_PIECES, 10_000n); // 49.98 … 50.02 USDT
+export const CLAIM_PIECES = 25;
+export const CLAIM_USDT_PIECES = piecesFrom(10_000_000n, CLAIM_PIECES, 1n);
 export const CLAIM_WETH_PIECES = splitIntoPieces(CLAIM_FEE_RESERVE_WEI, CLAIM_PIECES, 1_000_000_000n); // ± 1 gwei apart
 const WRAP_BATCH_WEI = 10_000_000_000_000_000n; // wrap 0.01 ETH at a time
 const GAS_KEEP_WEI = 3_000_000_000_000_000n; // keep 0.003 ETH public for gas
