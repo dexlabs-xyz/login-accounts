@@ -7,6 +7,7 @@ import Provider, {
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
 import type { GetSignedInUser, GetKycClaims, SignedInUser } from './contracts.ts';
+import { issuerUrl, clientList } from './config.ts';
 import { createStorage } from './storage.ts';
 
 export interface OidcOptions {
@@ -21,29 +22,16 @@ export interface OidcOptions {
 const escape = (s: string) =>
   s.replace(
     /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!),
   );
 
 export function createOidc(options: OidcOptions) {
-  const issuer = new URL(options.issuer);
-  // This iteration intentionally supports local testing only.
-  if (
-    issuer.protocol !== 'http:' ||
-    issuer.hostname !== 'localhost' ||
-    issuer.pathname !== '/oidc'
-  ) {
-    throw new Error('This unaudited OIDC iteration requires http://localhost:<port>/oidc.');
-  }
+  const issuer = issuerUrl(options.issuer);
+  const clients = clientList(options.clients, issuer);
+  const secure = issuer.protocol === 'https:';
   const redirectOrigins = [
     ...new Set(
-      options.clients
-        .flatMap((client) => client.redirect_uris ?? [])
-        .map((uri) => {
-          const target = new URL(uri);
-          if (target.hostname !== 'localhost' || target.protocol !== 'http:')
-            throw new Error('Local iteration requires localhost HTTP client redirects.');
-          return target.origin;
-        }),
+      clients.flatMap((client) => client.redirect_uris ?? []).map((uri) => new URL(uri).origin),
     ),
   ];
   const store = createStorage(options.db);
@@ -77,7 +65,7 @@ export function createOidc(options: OidcOptions) {
   );
   const provider = new Provider(options.issuer, {
     adapter: store.adapter,
-    clients: options.clients.map((client) => ({
+    clients: clients.map((client) => ({
       ...client,
       subject_type: 'pairwise',
       response_types: ['code'],
@@ -85,7 +73,11 @@ export function createOidc(options: OidcOptions) {
       token_endpoint_auth_method: 'none',
     })),
     jwks: options.jwks,
-    cookies: { keys: options.cookieKeys, short: { sameSite: 'lax' }, long: { sameSite: 'lax' } },
+    cookies: {
+      keys: options.cookieKeys,
+      short: { sameSite: 'lax', httpOnly: true, secure },
+      long: { sameSite: 'lax', httpOnly: true, secure },
+    },
     features: { devInteractions: { enabled: false } },
     scopes: ['openid'],
     claims: { openid: ['sub', 'verified_human', 'verification_sandbox'] },
@@ -102,7 +94,10 @@ export function createOidc(options: OidcOptions) {
       Session: 3600,
       Grant: 3600,
     },
-    interactions: { policy, url: (_ctx, interaction) => `/oidc/interaction/${interaction.uid}` },
+    interactions: {
+      policy,
+      url: (_ctx, interaction) => `/oidc/interaction/${interaction.uid}`,
+    },
     findAccount: async (_ctx, accountId) => ({
       accountId,
       async claims(_use, scope) {
@@ -126,6 +121,8 @@ export function createOidc(options: OidcOptions) {
       ctx.body = '<h1>Unable to continue signing in</h1><p>Return to the app and try again.</p>';
     },
   });
+  // The external origin comes only from the validated issuer, never forwarded input.
+  provider.proxy = true;
   const callback = provider.callback();
   const redirect = (res: ServerResponse, path: string) => {
     res.writeHead(303, { location: path });
@@ -135,7 +132,9 @@ export function createOidc(options: OidcOptions) {
     res.writeHead(status, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
-      'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${redirectOrigins.join(' ')}; frame-ancestors 'none'; base-uri 'none'`,
+      'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${redirectOrigins.join(
+        ' ',
+      )}; frame-ancestors 'none'; base-uri 'none'`,
       'referrer-policy': 'same-origin',
       'x-content-type-options': 'nosniff',
     });
@@ -147,6 +146,9 @@ export function createOidc(options: OidcOptions) {
     // Vite's proxy can replace Host with the API's internal address. Endpoint URLs
     // must use the configured public issuer, never that address or a forwarded header.
     req.headers.host = issuer.host;
+    req.headers['x-forwarded-host'] = issuer.host;
+    req.headers['x-forwarded-proto'] = issuer.protocol.slice(0, -1);
+    delete req.headers.forwarded;
     const url = new URL(req.url ?? '/', issuer.origin);
     const match = /^\/oidc\/interaction\/([A-Za-z0-9_-]+)(?:\/(complete|abort|confirm))?$/.exec(
       url.pathname,
@@ -198,7 +200,7 @@ export function createOidc(options: OidcOptions) {
                 {
                   extra: {
                     previousAuthentication: user
-                      ? (user.authenticatedAtMs ?? user.authenticatedAt * 1000)
+                      ? user.authenticatedAtMs ?? user.authenticatedAt * 1000
                       : 0,
                   },
                 },
@@ -266,7 +268,10 @@ export function createOidc(options: OidcOptions) {
           }
           const grant = interaction.grantId
             ? await provider.Grant.find(interaction.grantId)
-            : new provider.Grant({ accountId, clientId: String(interaction.params.client_id) });
+            : new provider.Grant({
+                accountId,
+                clientId: String(interaction.params.client_id),
+              });
           if (!grant) throw new Error('Grant missing');
           grant.addOIDCScope('openid');
           grant.addOIDCClaims(['verified_human', 'verification_sandbox']);
@@ -284,10 +289,19 @@ export function createOidc(options: OidcOptions) {
           return true;
         }
         const client = await provider.Client.find(String(interaction.params.client_id));
+        const name = escape(client?.clientName ?? 'this app');
+        // Show the user their own status, so they know exactly what this app will learn.
+        const kyc = (await options.getKycClaims?.(accountId, ['openid'])) ?? {};
+        const sees =
+          kyc.verified_human === true
+            ? `<p><strong>${name} will see:</strong> an ID that only this app gets, and that you’re a <strong>verified human${
+                kyc.verification_sandbox === true ? ' (test mode)' : ''
+              }</strong>.</p>`
+            : `<p><strong>${name} will see:</strong> an ID that only this app gets. You haven’t verified you’re human, so it won’t see that. <a href="/" target="_blank" rel="noopener">Verify on your Login account</a>, then sign in to this app again.</p>`;
         page(
           res,
           200,
-          `<small>Login · Local development · Unaudited</small><h1>Continue to ${escape(client?.clientName ?? 'this app')}?</h1><p>This app receives an ID unique to it and your human-verification status. Sandbox verification is labeled. Your email, name, wallet and identity documents are not shared.</p><form method="post" action="/oidc/interaction/${id}/confirm"><button>Allow and continue</button></form><form method="post" action="/oidc/interaction/${id}/abort"><button>Cancel</button></form>`,
+          `<small>Login · Testnet demo · Unaudited</small><h1>Continue to ${name}?</h1>${sees}<p>Your email, name, wallet and identity documents are never shared.</p><form method="post" action="/oidc/interaction/${id}/confirm"><button>Allow and continue</button></form><form method="post" action="/oidc/interaction/${id}/abort"><button>Cancel</button></form>`,
         );
         return true;
       } catch {

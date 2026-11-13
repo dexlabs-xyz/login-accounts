@@ -161,3 +161,6 @@ playwright-report/
 
 # Railgun circuit files downloaded by the server (public, large)
 apps/server/railgun-artifacts/
+
+# Never commit generated OIDC deployment secrets
+*oidc-secrets*.json

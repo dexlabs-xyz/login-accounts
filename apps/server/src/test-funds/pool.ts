@@ -41,6 +41,7 @@ const RAILGUN_PROXY = NETWORK_CONFIG[NETWORK].proxyContract;
 const POI_NODE_URLS = ['https://ppoi.fdi.network'];
 const WALLET_SOURCE = 'loginpool'; // shown on-chain as the shield source; lowercase, max 16 chars
 const ERC20 = [
+  'function deposit() payable',
   'function balanceOf(address) view returns (uint256)',
   'function allowance(address,address) view returns (uint256)',
   'function approve(address,uint256) returns (bool)',
@@ -56,6 +57,8 @@ export interface Pool {
   railgunAddress: string;
   /** The pool's Railgun DB encryption key. Server memory only. */
   encryptionKey: string;
+  /** Railgun's shield fee (basis points), read from the contract at start. */
+  shieldFeeBasisPoints: bigint;
   /** Latest private balances by bucket, then token address (lowercase). */
   balances: Map<Bucket, Map<string, bigint>>;
   refresh(): Promise<void>;
@@ -87,7 +90,7 @@ export function openPool(opts: { mnemonic: string; rpcUrl: string; artifactDir: 
     setLoggers(undefined, undefined); // the SDK's messages could include wallet details
     await startRailgunEngine(WALLET_SOURCE, new MemDown(), false, diskArtifactStore(opts.artifactDir), false, false, POI_NODE_URLS);
     getProver().setSnarkJSGroth16(groth16 as Parameters<ReturnType<typeof getProver>['setSnarkJSGroth16']>[0]);
-    await loadProvider(
+    const { feesSerialized } = await loadProvider(
       { chainId: CHAIN.id, providers: [{ provider: opts.rpcUrl, priority: 1, weight: 2, maxLogsPerBatch: 10 }] },
       NETWORK,
       15_000,
@@ -109,7 +112,9 @@ export function openPool(opts: { mnemonic: string; rpcUrl: string; artifactDir: 
       await refreshReceivePOIsForWallet(V2, NETWORK, info.id).catch(() => {});
     };
     await refresh();
-    return { publicWallet, provider, walletId: info.id, railgunAddress: info.railgunAddress, encryptionKey, balances, refresh };
+    if (!feesSerialized?.shieldFeeV2) throw new Error('Railgun shield fee unavailable.');
+    const shieldFeeBasisPoints = BigInt(feesSerialized.shieldFeeV2);
+    return { publicWallet, provider, walletId: info.id, railgunAddress: info.railgunAddress, encryptionKey, shieldFeeBasisPoints, balances, refresh };
   })();
   return started;
 }
@@ -119,6 +124,12 @@ export const balanceOf = (pool: Pool, bucket: Bucket, token: string) => pool.bal
 
 async function shieldKey(pool: Pool) {
   return keccak256(await pool.publicWallet.signMessage(getShieldPrivateKeySignatureMessage()));
+}
+
+/** Amount to shield so that `net` arrives after Railgun's shield fee (fee = gross × bp / 10000, rounded down). */
+export function grossForShield(net: bigint, feeBasisPoints: bigint): bigint {
+  const keep = 10_000n - feeBasisPoints;
+  return (net * 10_000n + keep - 1n) / keep;
 }
 
 async function feeData(pool: Pool) {
@@ -166,6 +177,72 @@ export async function shieldEth(pool: Pool, amount: bigint): Promise<string> {
     evmGasType: EVMGasType.Type2,
     gasEstimate,
     ...fees,
+  });
+  const sent = await pool.publicWallet.sendTransaction(transaction);
+  await sent.wait(1);
+  return sent.hash;
+}
+
+/** The pool's public holdings, which claims are paid from. */
+export async function publicBalances(pool: Pool) {
+  const owner = pool.publicWallet.address;
+  const [usdt, weth, eth] = await Promise.all([
+    new Contract(SEPOLIA_USDT, ERC20, pool.provider).balanceOf!(owner) as Promise<bigint>,
+    new Contract(SEPOLIA_WETH, ERC20, pool.provider).balanceOf!(owner) as Promise<bigint>,
+    pool.provider.getBalance(owner),
+  ]);
+  return { usdt, weth, eth };
+}
+
+async function waitFor(check: () => Promise<boolean>, what: string) {
+  // A lagging RPC node may not show the last transaction yet.
+  for (let i = 0; !(await check()); i++) {
+    if (i >= 30) throw new Error(`${what} not visible yet.`);
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+}
+
+/** Approves the Railgun contract for the pool's whole balance of `token`, if it can't already take `amount`. */
+async function ensureAllowance(pool: Pool, token: string, amount: bigint) {
+  const c = new Contract(token, ERC20, pool.publicWallet);
+  const owner = pool.publicWallet.address;
+  const enough = async () => ((await c.allowance!(owner, RAILGUN_PROXY)) as bigint) >= amount;
+  if (await enough()) return;
+  const all = (await c.balanceOf!(owner)) as bigint;
+  await (await c.approve!(RAILGUN_PROXY, all > amount ? all : amount)).wait(1);
+  await waitFor(enough, 'Approval');
+}
+
+/**
+ * TESTNET ONLY. One claim as a single shield from the pool's public address
+ * straight into `to` (a 0zk address): USDT, plus WETH for the claimer's fee
+ * reserve. Amounts are what the claimer receives; Railgun's shield fee is added
+ * on top. Public ETH is wrapped into WETH in batches of `wrapBatchWei`.
+ */
+export async function shieldClaim(pool: Pool, to: string, net: { usdt: bigint; weth: bigint }, wrapBatchWei: bigint): Promise<string> {
+  const owner = pool.publicWallet.address;
+  const usdt = grossForShield(net.usdt, pool.shieldFeeBasisPoints);
+  const weth = grossForShield(net.weth, pool.shieldFeeBasisPoints);
+  const have = await publicBalances(pool);
+  if (have.usdt < usdt) throw new Error('pool-empty');
+  if (have.weth < weth) {
+    const wrap = wrapBatchWei > weth - have.weth ? wrapBatchWei : weth - have.weth;
+    const wethContract = new Contract(SEPOLIA_WETH, ERC20, pool.publicWallet);
+    await (await wethContract.deposit!({ value: wrap })).wait(1);
+    await waitFor(async () => ((await wethContract.balanceOf!(owner)) as bigint) >= weth, 'Wrapped ETH');
+  }
+  await ensureAllowance(pool, SEPOLIA_USDT, usdt);
+  await ensureAllowance(pool, SEPOLIA_WETH, weth);
+  const key = await shieldKey(pool);
+  const recipients = [
+    { tokenAddress: SEPOLIA_USDT, amount: usdt, recipientAddress: to },
+    { tokenAddress: SEPOLIA_WETH, amount: weth, recipientAddress: to },
+  ];
+  const { gasEstimate } = await gasEstimateForShield(V2, NETWORK, key, recipients, [], owner);
+  const { transaction } = await populateShield(V2, NETWORK, key, recipients, [], {
+    evmGasType: EVMGasType.Type2,
+    gasEstimate,
+    ...(await feeData(pool)),
   });
   const sent = await pool.publicWallet.sendTransaction(transaction);
   await sent.wait(1);

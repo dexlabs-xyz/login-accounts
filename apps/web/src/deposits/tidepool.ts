@@ -72,8 +72,40 @@ async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pr
   return data as T;
 }
 
+/**
+ * What a withdrawal can arrive as, besides USDT on Ethereum Sepolia (team
+ * decision, 9 Nov 2026). SOL is left out: Tidepool caps it at 0.005 SOL per swap.
+ */
+export const WITHDRAW_TOKENS = [
+  { blockchain: 'eth', symbol: 'ETH' },
+  { blockchain: 'eth', symbol: 'USDC' },
+  { blockchain: 'sol', symbol: 'USDC' },
+  { blockchain: 'base', symbol: 'USDC' },
+  { blockchain: 'arb', symbol: 'ETH' },
+] as const;
+
+/** Tidepool's withdrawal tokens, checked: the Sepolia ones against our verified contracts. */
+export function withdrawTokens(tokens: Token[]): Token[] {
+  const out: Token[] = [];
+  for (const w of WITHDRAW_TOKENS) {
+    const t = tokens.find((x) => x.blockchain === w.blockchain && x.symbol === w.symbol);
+    if (!t || typeof t.assetId !== 'string' || !Number.isInteger(t.decimals)) continue;
+    if (w.symbol === 'ETH' && (t.decimals !== 18 || t.contractAddress)) continue; // native ETH only
+    if (w.blockchain === 'eth' && w.symbol === 'USDC' && (t.contractAddress?.toLowerCase() !== SEPOLIA_USDC.toLowerCase() || t.decimals !== 6)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
 /** The deposit destination: Tidepool's test USDT on Ethereum Sepolia. Must match our checked token. */
-export async function loadTokens(): Promise<{ usdt: Token; origins: Token[]; sepolia: SepoliaSwapTokens | null; ethPrice: number | null }> {
+export async function loadTokens(): Promise<{
+  usdt: Token;
+  origins: Token[];
+  sepolia: SepoliaSwapTokens | null;
+  ethPrice: number | null;
+  /** What a withdrawal can arrive as, through a swap. */
+  withdraw: Token[];
+}> {
   const tokens = await call<Token[]>('GET', '/v0/tokens');
   if (!Array.isArray(tokens)) throw new TidepoolError('Unexpected token list.');
   const usdt = tokens.find((t) => t.blockchain === 'eth' && t.symbol === 'USDT');
@@ -105,7 +137,7 @@ export async function loadTokens(): Promise<{ usdt: Token; origins: Token[]; sep
       ? { usdc, eth }
       : null;
   const ethPrice = typeof eth?.price === 'number' && Number.isFinite(eth.price) && eth.price > 0 ? eth.price : null;
-  return { usdt, origins, sepolia, ethPrice };
+  return { usdt, origins, sepolia, ethPrice, withdraw: withdrawTokens(tokens) };
 }
 
 export interface Quote {
@@ -120,22 +152,27 @@ export interface Quote {
 
 /**
  * Ask for a real quote: the user's tokens on the origin chain, delivered as
- * USDT to our fresh Sepolia address. Checks the answer matches what we asked.
+ * USDT to our fresh Sepolia address (deposits), or Sepolia USDT delivered as
+ * `destination` to the user's address (withdrawals). Checks the answer matches
+ * what we asked.
  */
 export async function getQuote(p: {
   origin: Token;
   usdt: Token;
+  /** Withdrawals: what arrives. Default: USDT on Sepolia. */
+  destination?: Token;
   amount: string; // smallest units
-  recipient: string; // fresh Sepolia address
+  recipient: string; // deposits: fresh Sepolia address; withdrawals: the user's address
   refundTo: string; // on the origin chain
 }): Promise<Quote> {
+  const destination = p.destination ?? p.usdt;
   const deadline = new Date(Date.now() + 30 * 60_000).toISOString();
   const res = await call<{ quote?: Partial<Quote>; quoteRequest?: Record<string, unknown> }>('POST', '/v0/quote', {
     dry: false,
     swapType: 'EXACT_INPUT',
     slippageTolerance: 100,
     originAsset: p.origin.assetId,
-    destinationAsset: p.usdt.assetId,
+    destinationAsset: destination.assetId,
     amount: p.amount,
     depositType: 'ORIGIN_CHAIN',
     refundTo: p.refundTo,
@@ -147,7 +184,7 @@ export async function getQuote(p: {
   const q = res.quote ?? {};
   const echo = res.quoteRequest ?? {};
   // Untrusted input: the answer must be for exactly our request, to our address.
-  if (echo.recipient !== p.recipient || echo.destinationAsset !== p.usdt.assetId || echo.refundTo !== p.refundTo) {
+  if (echo.recipient !== p.recipient || echo.destinationAsset !== destination.assetId || echo.refundTo !== p.refundTo) {
     throw new TidepoolError('Tidepool’s quote doesn’t match the request.');
   }
   if (

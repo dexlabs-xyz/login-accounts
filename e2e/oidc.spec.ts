@@ -30,7 +30,9 @@ test('passkey sign-in to OIDC: consent, pairwise IDs, fresh authentication and l
     ?.subject.match(/\d{6}/)?.[0];
   assert.ok(code);
   await page.getByLabel('6-digit code').fill(code);
-  await page.getByRole('button', { name: 'Verify', exact: true }).click();
+  // The consent page tells this (unverified) user exactly what the app will see.
+  await page.getByText('You haven’t verified you’re human, so it won’t see that.').waitFor();
+  assert.ok(!(await page.textContent('body'))?.includes(email));
   await page.getByRole('button', { name: 'Allow and continue' }).click();
   await page.getByRole('heading', { name: 'Signed in to the chess demo' }).waitFor();
   const first = await page.locator('code').textContent();
@@ -44,7 +46,15 @@ test('passkey sign-in to OIDC: consent, pairwise IDs, fresh authentication and l
   await page.getByRole('link', { name: 'Continue with Login', exact: true }).click();
   await page.getByRole('heading', { name: 'Signed in to the chess demo' }).waitFor();
   assert.ok(first === (await page.locator('code').textContent()));
-  await page.getByRole('link', { name: 'Try another flow' }).click();
+  // The account page lists both apps and what they see, and shows "Not verified" at the top.
+  await page.goto('http://localhost:5180/#verification');
+  await page.getByTestId('human-status').getByText('Not verified').waitFor();
+  await page.goto('http://localhost:5180/#settings');
+  const apps = page.getByTestId('connected-apps');
+  await apps.getByText('Chess demo').waitFor();
+  await apps.getByText('Second demo app').waitFor();
+  assert.ok(!(await apps.textContent())?.includes('verified human'));
+  await page.goto('http://localhost:5190');
   // Hold the virtual device until the fresh-check screen is observable.
   await device.setResponds(false);
   const checksBeforeFresh = passkeyChecks;

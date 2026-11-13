@@ -1,7 +1,7 @@
 /** Shared setup for live Sepolia tests (send, withdraw). TESTNET ONLY. */
 import { expect, type Page } from '@playwright/test';
-import { Contract, JsonRpcProvider, Wallet, parseUnits } from 'ethers';
-import { Device, disableAutofill, signUp } from './helpers.ts';
+import { JsonRpcProvider, Wallet, parseEther } from 'ethers';
+import { closeSheet, Device, disableAutofill, openSheet, signUp } from './helpers.ts';
 
 export const RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 export const TIDEPOOL = 'https://www.usetidepool.tech';
@@ -15,7 +15,8 @@ export async function watch(page: Page, testId: string, until: RegExp, timeout: 
   let last = '';
   await expect
     .poll(async () => {
-      const t = (await page.getByTestId(testId).textContent().catch(() => '')) ?? '';
+      // Short timeout: once the status is gone (e.g. back to the form on an error), don't hang.
+      const t = (await page.getByTestId(testId).textContent({ timeout: 1_000 }).catch(() => '')) ?? '';
       if (t && t !== last) say(`${testId}: ${(last = t)}`);
       return t;
     }, { timeout, intervals: [3_000] })
@@ -23,40 +24,64 @@ export async function watch(page: Page, testId: string, until: RegExp, timeout: 
 }
 
 /**
- * Signs up a new account and deposits `usdt` USDT directly (fastest path), which
- * also funds the fee balance, then waits until both are Spendable.
- * Returns the deposit address used (it's publicly linked to this account).
+ * Signs up a new account and funds it with Login's own testnet pieces only
+ * (Tidepool's faucet is no longer available through its API, 8 Nov 2026):
+ * 1. the in-app test-funds claim (250 USDT + the hidden fee reserve);
+ * 2. a deposit of 0.003 ETH from a throwaway wallet funded by Login's gas
+ *    faucet, through "From an Ethereum wallet" (so the ETH path runs too).
+ * Then waits until USDT and the fee reserve are Spendable. Returns the deposit
+ * address (publicly linked to this account) and the wallet that funded it.
  */
-export async function fundedAccount(page: Page, usdt: string, say: (m: string) => void) {
+export async function fundedAccount(page: Page, say: (m: string) => void) {
   await disableAutofill(page);
-  page.on('console', (m) => m.type() === 'error' && /railgun/i.test(m.text()) && say(`console: ${m.text().slice(0, 400)}`));
+  page.on('console', (m) => (m.type() === 'error' && /railgun/i.test(m.text())) || m.text().startsWith('[railgun POI]') ? say(`console: ${m.text().slice(0, 400)}`) : undefined);
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 
-  const funder = Wallet.createRandom().connect(provider); // throwaway, testnet only
-  expect((await page.request.post('/api/testnet-gas', { data: { address: funder.address } })).ok()).toBe(true);
-  // Tidepool's faucet is community-run and sometimes refuses briefly: retry, logging why.
+  // "Test USDT" on Home; its updates arrive as toasts (testfunds-status).
+  const funds = page;
+  // A freshly started local server needs a few minutes to open the pool ("still starting"): retry.
   await expect
     .poll(
       async () => {
-        const r = await page.request.post(`${TIDEPOOL}/v0/faucet`, { data: { chain: 'eth', address: funder.address } });
-        if (!r.ok()) say(`Tidepool faucet ${r.status()}: ${(await r.text()).slice(0, 200)}`);
-        return r.ok();
+        await page.keyboard.press('Shift'); // stay "active" (15-minute idle lock)
+        if (await funds.getByTestId('testfunds-status').isVisible()) return true;
+        const button = page.getByRole('button', { name: 'Test USDT', exact: true });
+        if (await button.isEnabled().catch(() => false)) await button.click();
+        await page.waitForTimeout(3_000);
+        return funds.getByTestId('testfunds-status').isVisible();
       },
-      { timeout: 10 * 60_000, intervals: [30_000] },
+      { timeout: 30 * 60_000, intervals: [30_000] },
     )
     .toBe(true);
-  const token = new Contract(SEPOLIA_USDT, ERC20, funder);
-  await expect.poll(async () => (await provider.getBalance(funder.address)) > 0n, { timeout: 180_000, intervals: [5_000] }).toBe(true);
-  await expect.poll(async () => ((await token.balanceOf!(funder.address)) as bigint) >= parseUnits(usdt, 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
+  await expect(funds.getByTestId('testfunds-status')).toHaveText(/^Sent /, { timeout: 10 * 60_000 });
+  say('test funds sent');
 
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  const funder = Wallet.createRandom().connect(provider); // throwaway, testnet only
+  const gas = await page.request.post('/api/testnet-gas', { data: { address: funder.address } });
+  if (!gas.ok()) say(`gas faucet refused: HTTP ${gas.status()} ${(await gas.text()).slice(0, 200)}`);
+  expect(gas.ok()).toBe(true);
+  await expect.poll(async () => (await provider.getBalance(funder.address)) >= parseEther('0.0035'), { timeout: 180_000, intervals: [5_000] }).toBe(true);
+
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Ethereum Sepolia' }).click();
   const depositTo = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
-  await (await token.transfer!(depositTo, parseUnits(usdt, 6))).wait(1);
-  await watch(page, 'active-deposit-status', /^Done\./, 8 * 60_000, say);
+  // The public RPC sometimes fails gas estimation on a plain transfer (seen 9 Nov 2026): retry.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await (await funder.sendTransaction({ to: depositTo, value: parseEther('0.003') })).wait(1);
+      break;
+    } catch (e) {
+      if (attempt >= 4) throw e;
+      say(`deposit send failed (attempt ${attempt}), retrying: ${String(e).slice(0, 120)}`);
+      await page.waitForTimeout(10_000);
+    }
+  }
+  await watch(page, 'active-deposit-status', /^Done\./, 20 * 60_000, say);
+  await closeSheet(page);
 
   // Measured on Sepolia, 5 Nov 2026: fresh shields took 52, 74 and over 90 minutes to clear.
   // The wallet locks after 15 minutes idle (D5), so act like a user who's still here,
@@ -76,5 +101,5 @@ export async function fundedAccount(page: Page, usdt: string, say: (m: string) =
     .toBe(true);
   await expect(card.getByTestId('fee-reserve-ready')).toBeVisible({ timeout: 10 * 60_000 });
   say(`spendable after ${Math.round((Date.now() - t0) / 1000)}s`);
-  return { card, depositTo };
+  return { card, depositTo, funder: funder.address };
 }

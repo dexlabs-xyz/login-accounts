@@ -6,7 +6,10 @@
 export interface OutboxEmail {
   to: string;
   subject: string;
+  /** Plain text. Always sent; it's what text-only email apps show. */
   body: string;
+  /** Optional designed version. Email apps that can show HTML show this instead of `body`. */
+  html?: string;
   sentAt: number;
 }
 
@@ -20,14 +23,23 @@ export interface Mailer {
  * email provider; nothing else does. The API key is a secret from the host's
  * settings and is never logged.
  */
-export function resendMailer(opts: { apiKey: string; from: string; fetch?: typeof fetch }): Mailer {
+export function resendMailer(opts: { apiKey: string; from: string; fetch?: typeof fetch; timeoutMs?: number }): Mailer {
   const doFetch = opts.fetch ?? globalThis.fetch;
+  const timeoutMs = opts.timeoutMs ?? 10_000;
   return {
     async send(email) {
       const res = await doFetch('https://api.resend.com/emails', {
         method: 'POST',
+        // Give up after 10 s, so a slow provider can't hold a request open forever.
+        signal: AbortSignal.timeout(timeoutMs),
         headers: { authorization: `Bearer ${opts.apiKey}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ from: opts.from, to: [email.to], subject: email.subject, text: email.body }),
+        body: JSON.stringify({
+          from: opts.from,
+          to: [email.to],
+          subject: email.subject,
+          text: email.body,
+          ...(email.html ? { html: email.html } : {}),
+        }),
       });
       // Status only: Resend's error body could echo the address.
       if (!res.ok) throw new Error(`Email provider refused the message (${res.status}).`);

@@ -2,12 +2,17 @@ import { serve } from '@hono/node-server';
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { openDb } from './db.ts';
+import { issuerUrl } from './oidc/config.ts';
 import { loadKycConfig } from './kyc/config.ts';
 import { createSumsubClient } from './kyc/sumsub.ts';
 import { devOutboxMailer, resendMailer, type Mailer, type OutboxEmail } from './mail.ts';
 import { ethersGasSender } from './testnet-gas/sender.ts';
 
 const config = loadConfig();
+if (process.env.OIDC_ENABLED === '1' && issuerUrl(process.env.OIDC_ISSUER ?? 'http://localhost:5180/oidc').protocol === 'https:' &&
+    (!process.env.DB_PATH || config.dbPath === ':memory:')) {
+  throw new Error('Hosted OIDC requires DB_PATH on a persistent volume.');
+}
 const outbox: OutboxEmail[] = [];
 
 let mailer: Mailer;
@@ -44,13 +49,15 @@ const testFunds = poolPhrase
 const { app } = createApp({ config, db: openDb(config.dbPath), mailer, outbox, kyc, gasSender, testFunds });
 
 // Locally only this machine; on a host (Railway) set HOST=0.0.0.0 so its proxy can reach it.
-serve({ fetch: app.fetch, port: config.port, hostname: process.env.HOST ?? '127.0.0.1' }, ({ port }) => {
-  console.log(`Login API on http://127.0.0.1:${port} (RP ID: ${config.rpId})`);
+const hostname = process.env.HOST ?? '127.0.0.1';
+serve({ fetch: app.fetch, port: config.port, hostname }, ({ port }) => {
+  console.log(`Login API listening on ${hostname}:${port} (RP ID: ${config.rpId})`);
   if (config.devOutbox) console.log('Dev outbox on: email codes are shown at /dev/outbox.');
   console.log(
     !kycConfig
       ? 'KYC off: set SUMSUB_APP_TOKEN and SUMSUB_SECRET_KEY (sandbox) to turn it on.'
-      : `KYC on: Sumsub SANDBOX, ${kycConfig.webhookSecret ? 'webhooks' : 'polling (local development)'}.`,
+      : `KYC on: Sumsub SANDBOX, ${kycConfig.webhookSecret ? 'webhooks' : 'polling (local development)'}` +
+        `${kycConfig.simulate ? ', simulated results ON (KYC_SIMULATE=1)' : ''}.`,
   );
   console.log(
     gasSender

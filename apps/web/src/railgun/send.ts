@@ -56,6 +56,8 @@ export interface SendContext {
   unshieldFeeBasisPoints: () => bigint | null;
   /** The user's own Login deposit addresses (lowercase): withdrawing to one links them publicly. */
   ownDepositAddresses: () => Promise<Set<string>>;
+  /** Public addresses that funded the user's deposits (lowercase): withdrawing to one links them publicly. */
+  depositFunders: () => Promise<Set<string>>;
   onProgress: (progress: number) => void;
 }
 
@@ -84,7 +86,8 @@ export class SendError extends Error {
       | 'no-broadcaster'
       | 'fee-too-high'
       | 'quote-expired'
-      | 'broadcaster-refused',
+      | 'broadcaster-refused'
+      | 'still-confirming',
     cause?: unknown,
   ) {
     super(code, cause === undefined ? undefined : { cause });
@@ -120,7 +123,23 @@ export function createSender(ctx: SendContext) {
   return {
     /** Price a send: check the address and balances, pick a broadcaster, estimate its fee. */
     async quote(params: unknown) {
-      const { kind = 'transfer', to: toText, amount: amountText } = params as { kind?: SendKind; to: string; amount: string };
+      const {
+        kind = 'transfer',
+        to: toText,
+        amount: amountText,
+        finalTo,
+      } = params as {
+        kind?: SendKind;
+        to: string;
+        amount: string;
+        /**
+         * Swapped withdrawals: `to` is Tidepool's one-time swap address, and this
+         * is the user's address where the swapped token arrives. EVM addresses
+         * get the same checks as a direct withdrawal (the same address on any
+         * EVM chain is publicly the same owner). Solana addresses: none apply.
+         */
+        finalTo?: string;
+      };
       if (kind !== 'transfer' && kind !== 'unshield') throw new Error('Unknown send kind.');
       if (typeof toText !== 'string') throw new SendError('invalid-address');
       let to = toText;
@@ -129,9 +148,15 @@ export function createSender(ctx: SendContext) {
       } else {
         if (!isAddress(to) || getAddress(to) === ZeroAddress) throw new SendError('invalid-address');
         to = getAddress(to);
-        // A deposit address is publicly tied to this user's shields; sending there undoes the privacy.
-        if ((await ctx.ownDepositAddresses()).has(to.toLowerCase())) throw new SendError('own-deposit-address');
       }
+      if (finalTo !== undefined && (kind !== 'unshield' || typeof finalTo !== 'string')) throw new SendError('invalid-address');
+      // The address whose owner becomes public: the user's own for a swap, else the recipient.
+      const linked = kind !== 'unshield' ? null : finalTo === undefined ? to : isAddress(finalTo) ? getAddress(finalTo) : null;
+      // A deposit address is publicly tied to this user's shields; sending there undoes the privacy.
+      const own = kind === 'unshield' ? await ctx.ownDepositAddresses() : new Set<string>();
+      if (own.has(to.toLowerCase()) || (linked && own.has(linked.toLowerCase()))) throw new SendError('own-deposit-address');
+      // Allowed, but flagged on review: this address sent money into one of the user's deposits.
+      const fundedDeposits = linked !== null && (await ctx.depositFunders()).has(linked.toLowerCase());
       const amount = BigInt(amountText);
       const spendable = ctx.spendable();
       if (amount <= 0n || (spendable.get(SEPOLIA_USDT.toLowerCase()) ?? 0n) < amount) throw new SendError('insufficient-usdt');
@@ -151,6 +176,13 @@ export function createSender(ctx: SendContext) {
       const { gasEstimate } = await estimate().catch((e: unknown) => {
         // The SDK checks the fee balance itself during the estimate; give the page our error code.
         if (e instanceof Error && /too low to pay broadcaster fee/i.test(e.message)) throw new SendError('insufficient-fee-balance');
+        // Right after a send, the wallet may not have seen it confirm yet and picks a note that
+        // the send already spent; the chain refuses it (nothing is sent). Seen live 11 Nov 2026.
+        if (e instanceof Error && /note already spent/i.test(e.message)) throw new SendError('still-confirming', e);
+        // Same family: the wallet's view of Railgun's merkle tree is behind the chain (e.g. right after a
+        // deposit lands). The SDK says "Invalid Merkle Root. Please sync your balances"; the worker rescans on
+        // still-confirming, so pressing Review again works. Seen live 12 Nov 2026.
+        if (e instanceof Error && /invalid merkle root/i.test(e.message)) throw new SendError('still-confirming', e);
         throw e;
       });
       async function estimate() {
@@ -202,6 +234,7 @@ export function createSender(ctx: SendContext) {
         feeWei: fee.toString(),
         railgunFee: railgunFee.toString(),
         receives: (amount - railgunFee).toString(),
+        fundedDeposits,
         expiresAt,
       };
     },

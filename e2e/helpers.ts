@@ -92,23 +92,91 @@ export async function verifyEmail(page: Page, email: string) {
   await page.getByLabel('Email').fill(email);
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByLabel('6-digit code').fill(await latestCode(page, email));
-  await page.getByRole('button', { name: 'Verify' }).click();
 }
 
 export async function signUp(page: Page, email = freshEmail()) {
   await verifyEmail(page, email);
-  await expect(page.getByRole('heading', { name: 'Your account' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
   return email;
 }
 
+/** The signed-in pages (sidebar on desktop). The hash keeps the page across reloads and sign-in. */
+export async function goTo(page: Page, name: 'Home' | 'Notifications' | 'Verification' | 'Settings') {
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name, exact: true }).click();
+}
+
+/**
+ * The "Your wallet is locked" pop-up opens by itself when the wallet is locked (Gold, 13 Nov). If it was closed,
+ * the "Unlock your wallet to continue" toast's Unlock button opens it again. Then press Unlock in the pop-up.
+ */
+export async function unlockWallet(page: Page) {
+  const dialog = page.getByRole('dialog', { name: 'Your wallet is locked' });
+  const reopen = toastWith(page, 'Unlock your wallet to continue').getByRole('button', { name: 'Unlock', exact: true });
+  await expect(dialog.or(reopen).first()).toBeVisible();
+  if (!(await dialog.isVisible())) await reopen.click();
+  await dialog.getByRole('button', { name: 'Unlock', exact: true }).click();
+}
+
+/** Close the unlock pop-up to use a page while the wallet stays locked (Esc, like the other pop-ups). */
+export async function dismissUnlock(page: Page) {
+  const dialog = page.getByRole('dialog', { name: 'Your wallet is locked' });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+}
+
+/** Home's Send / Receive pop-ups. */
+export async function openSheet(page: Page, name: 'Send' | 'Receive') {
+  await goTo(page, 'Home');
+  await page.getByRole('button', { name, exact: true }).click();
+  return page.getByRole('dialog', { name });
+}
+/**
+ * The Send pop-up's options: a private send, or out to an Ethereum or Solana address (a withdrawal).
+ * Steps back to the options first if the pop-up is already on another screen.
+ */
+export async function chooseSend(page: Page, where: 'Privately via Railgun' | 'To an Ethereum address' | 'To a Solana address') {
+  const dlg = page.getByRole('dialog', { name: 'Send' });
+  if (!(await dlg.isVisible())) await openSheet(page, 'Send');
+  const row = dlg.getByRole('button', { name: where });
+  while (!(await row.isVisible())) await dlg.getByRole('button', { name: 'Previous step' }).click();
+  await row.click();
+  // Each form stays mounted (hidden) while you step around: return the one just opened.
+  const mode = { 'Privately via Railgun': 'private', 'To an Ethereum address': 'evm', 'To a Solana address': 'sol' }[where];
+  return dlg.locator(`[data-send-mode="${mode}"]`);
+}
+
+/** Errors are toasts now (Gold, 12 Nov): the latest one. */
+export const errorToast = (page: Page) => page.locator('[data-sonner-toast][data-type="error"]').last();
+/** Every error toast on screen, joined: older errors (an earlier refusal) can still be showing above the newest. */
+export const errorTexts = async (page: Page) =>
+  (await page.locator('[data-sonner-toast][data-type="error"]').allTextContents().catch(() => [] as string[])).join(' | ');
+/** Any toast (feedback, warnings, errors and status are all toasts), optionally the one containing `text`. */
+export const toastWith = (page: Page, text?: string | RegExp) =>
+  text === undefined ? page.locator('[data-sonner-toast]') : page.locator('[data-sonner-toast]').filter({ hasText: text });
+
+/** What the Home balance says is spendable now, in USDT (it stays readable behind a pop-up). */
+export async function spendableUsdt(page: Page): Promise<number> {
+  const t = (await page.getByTestId('balance-Spendable-usdt').textContent({ timeout: 1_000 }).catch(() => '')) ?? '';
+  return Number(/\$?([\d,.]+)/.exec(t)?.[1]?.replace(/,/g, '') ?? 0);
+}
+
+/** Esc closes any pop-up (the redesigned ones, like Receive, have no × button). */
+export async function closeSheet(page: Page) {
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+}
+
 export async function walletCheck(page: Page): Promise<string> {
+  await goTo(page, 'Settings');
   const text = await page.getByText('Wallet check:').locator('code').textContent();
   return text!.trim();
 }
 
 export async function signOut(page: Page) {
+  await goTo(page, 'Settings');
   await page.getByRole('button', { name: 'Sign out' }).click();
-  await expect(page.getByRole('heading', { name: 'Sign up or sign in' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome' })).toBeVisible();
 }
 
 /**

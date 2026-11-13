@@ -17,7 +17,7 @@ import {
   populateShieldBaseToken,
 } from '@railgun-community/wallet';
 import { EVMGasType, NETWORK_CONFIG, NetworkName, TXIDVersion } from '@railgun-community/shared-models';
-import { Contract, HDNodeWallet, JsonRpcProvider, getAddress, isAddress, keccak256, ZeroAddress, type Provider } from 'ethers';
+import { Contract, HDNodeWallet, JsonRpcProvider, getAddress, isAddress, keccak256, zeroPadValue, ZeroAddress, type Provider } from 'ethers';
 import { openJson, sealJson, type Bytes, type SealedJson } from '@login/vault';
 import {
   DEPOSIT_ETH_GAS_KEEP_WEI,
@@ -45,17 +45,35 @@ const ERC20 = [
 ];
 /** Stop scanning after this many unused addresses in a row (like standard wallets). */
 const GAP_LIMIT = 20;
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+/** The public RPC keeps logs for about 10,000 blocks (~1.4 days) and caps a query there too. */
+const LOG_WINDOW_BLOCKS = 9_000;
+/** Look for who sent ETH only across short gaps between two balance checks. */
+const ETH_SCAN_MAX_BLOCKS = 30;
 const RECORDS_PURPOSE = 'deposit-records';
 
 export interface DepositContext {
   mnemonic: string;
   recordsKey: Bytes;
   railgunAddress: string;
+  /** Railgun's wallet id: names this account's records slot (several accounts can share a browser). */
+  walletId: string;
   rpcUrl: string;
   onChange: (records: DepositRecord[]) => void;
 }
 
 const pathFor = (index: number) => `m/44'/60'/0'/0/${index}`;
+
+/** Senders of ERC-20 Transfer logs (topic 1), lowercase. Pure, for tests. */
+export function sendersFromLogs(logs: readonly { topics: readonly string[] }[]): string[] {
+  return logs.filter((l) => l.topics[0] === TRANSFER_TOPIC && l.topics[1]).map((l) => `0x${l.topics[1]!.slice(-40)}`.toLowerCase());
+}
+/** Senders of plain transactions to `address`, lowercase. Pure, for tests. */
+export function sendersOfTxs(txs: readonly { from: string; to: string | null; value: bigint }[], address: string): string[] {
+  const to = address.toLowerCase();
+  return txs.filter((t) => t.to?.toLowerCase() === to && t.value > 0n).map((t) => t.from.toLowerCase());
+}
+const union = (a: readonly string[] | undefined, b: readonly string[]) => [...new Set([...(a ?? []), ...b])];
 
 // ---------- encrypted records in IndexedDB ----------
 
@@ -76,6 +94,44 @@ async function kv<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReq
   });
 }
 
+/** Before 8 Nov 2026 every account in a browser used this one slot. */
+export const LEGACY_RECORDS_SLOT = 'records';
+export const recordsSlot = (walletId: string) => `records:${walletId}`;
+
+interface SlotStore<S> {
+  get(slot: string): Promise<S | undefined>;
+  put(slot: string, value: S): Promise<void>;
+  remove(slot: string): Promise<void>;
+}
+
+/**
+ * This account's sealed records, or null if it has none yet. Records in the
+ * old shared slot move to this account's slot only if this account's key opens
+ * them; otherwise they belong to another account on this browser, which moves
+ * them when it next unlocks. Pure over a small store, for tests.
+ */
+export async function loadSealedRecords<S, T>(store: SlotStore<S>, slot: string, open: (sealed: S) => Promise<T>): Promise<T | null> {
+  const own = await store.get(slot);
+  if (own !== undefined) return open(own);
+  const legacy = await store.get(LEGACY_RECORDS_SLOT);
+  if (legacy === undefined) return null;
+  let records: T;
+  try {
+    records = await open(legacy);
+  } catch {
+    return null; // another account's records
+  }
+  await store.put(slot, legacy);
+  await store.remove(LEGACY_RECORDS_SLOT);
+  return records;
+}
+
+const idbSlots: SlotStore<SealedJson> = {
+  get: (slot) => kv('readonly', (s) => s.get(slot)) as Promise<SealedJson | undefined>,
+  put: async (slot, value) => void (await kv('readwrite', (s) => s.put(value, slot))),
+  remove: async (slot) => void (await kv('readwrite', (s) => s.delete(slot))),
+};
+
 export function createDeposits(ctx: DepositContext) {
   const provider: Provider = new JsonRpcProvider(ctx.rpcUrl);
   const usdt = new Contract(SEPOLIA_USDT, ERC20, provider);
@@ -91,14 +147,14 @@ export function createDeposits(ctx: DepositContext) {
 
   async function load(): Promise<DepositRecord[]> {
     if (cache) return cache;
-    const sealed = (await kv('readonly', (s) => s.get('records'))) as SealedJson | undefined;
-    cache = sealed ? await openJson<DepositRecord[]>(ctx.recordsKey, RECORDS_PURPOSE, sealed) : [];
+    const slot = recordsSlot(ctx.walletId);
+    cache = (await loadSealedRecords(idbSlots, slot, (sealed) => openJson<DepositRecord[]>(ctx.recordsKey, RECORDS_PURPOSE, sealed))) ?? [];
     return cache;
   }
   async function save(records: DepositRecord[]) {
     cache = records.sort((a, b) => a.index - b.index);
     const sealed = await sealJson(ctx.recordsKey, RECORDS_PURPOSE, cache);
-    await kv('readwrite', (s) => s.put(sealed, 'records'));
+    await idbSlots.put(recordsSlot(ctx.walletId), sealed);
     ctx.onChange(cache);
   }
   async function patch(index: number, changes: Partial<DepositRecord>) {
@@ -108,6 +164,47 @@ export function createDeposits(ctx: DepositContext) {
     Object.assign(r, changes, { updatedAt: Date.now() });
     await save(records);
     return r;
+  }
+
+  /**
+   * Note who sent tokens to a deposit address, from public Transfer logs. Asks
+   * the RPC only for transfers *into* this address (which it already sees us
+   * watching), never about any withdraw address. Best effort: never blocks a deposit.
+   */
+  async function noteTokenFunders(r: DepositRecord) {
+    try {
+      const latest = await provider.getBlockNumber();
+      const fromBlock = Math.max(latest - LOG_WINDOW_BLOCKS, (r.fundersCheckedBlock ?? 0) + 1);
+      if (fromBlock > latest) return;
+      const logs = await provider.getLogs({
+        address: DEPOSIT_TOKENS.map((t) => t.address),
+        topics: [TRANSFER_TOPIC, null, zeroPadValue(r.address, 32)],
+        fromBlock,
+        toBlock: latest,
+      });
+      await patch(r.index, { funders: union(r.funders, sendersFromLogs(logs)), fundersCheckedBlock: latest });
+    } catch {
+      // The warning is a convenience; the review screen's general advice still applies.
+    }
+  }
+
+  /** Last balance check per deposit, to spot ETH arriving and find who sent it. Memory only. */
+  const lastEth = new Map<number, { block: number; eth: bigint }>();
+  async function noteEthFunders(r: DepositRecord, eth: bigint, block: number) {
+    const prev = lastEth.get(r.index);
+    lastEth.set(r.index, { block, eth });
+    if (!prev || eth <= prev.eth || block - prev.block > ETH_SCAN_MAX_BLOCKS) return;
+    try {
+      const found: string[] = [];
+      // A little margin: load-balanced RPC nodes can lag each other by a block or two.
+      for (let n = Math.max(0, prev.block - 2); n <= block; n++) {
+        const b = await provider.getBlock(n, true);
+        found.push(...sendersOfTxs(b?.prefetchedTransactions ?? [], r.address));
+      }
+      if (found.length) await patch(r.index, { funders: union(r.funders, found) });
+    } catch {
+      // Best effort, as above.
+    }
   }
 
   /** Has this address ever been used? Any nonce, ETH, USDT or USDC counts. */
@@ -168,12 +265,13 @@ export function createDeposits(ctx: DepositContext) {
 
     /** Page-side progress (quote taken, delivered, refunded...). Only these fields can change here. */
     async update(params: unknown) {
-      const { index, status, quote, userEthWei, swaps } = params as {
+      const { index, status, quote, userEthWei, swaps, withdrawal } = params as {
         index: number;
         status?: DepositStatus;
         quote?: DepositRecord['quote'];
         userEthWei?: string;
         swaps?: DepositSwap[];
+        withdrawal?: DepositRecord['withdrawal'];
       };
       const allowed: DepositStatus[] = ['awaiting-delivery', 'delivered', 'refunded', 'failed'];
       if (status && !allowed.includes(status)) throw new Error('Status not allowed from the page.');
@@ -183,6 +281,7 @@ export function createDeposits(ctx: DepositContext) {
         ...(quote ? { quote } : {}),
         ...(userEthWei !== undefined ? { userEthWei } : {}),
         ...(swaps ? { swaps } : {}),
+        ...(withdrawal ? { withdrawal } : {}),
       });
     },
 
@@ -227,6 +326,7 @@ export function createDeposits(ctx: DepositContext) {
         usdt.balanceOf!(r.address) as Promise<bigint>,
         usdc.balanceOf!(r.address) as Promise<bigint>,
       ]);
+      void provider.getBlockNumber().then((block) => noteEthFunders(r, eth, block), () => {});
       return { eth: eth.toString(), usdt: a.toString(), usdc: b.toString() };
     },
 
@@ -241,6 +341,7 @@ export function createDeposits(ctx: DepositContext) {
       const r = (await load()).find((x) => x.index === index);
       if (!r) throw new Error('Unknown deposit.');
       const wallet = HDNodeWallet.fromPhrase(ctx.mnemonic, undefined, pathFor(index)).connect(provider);
+      await noteTokenFunders(r); // while the public logs still have the deposit
       const held = (
         await Promise.all(
           DEPOSIT_TOKENS.map(async (t) => ({ ...t, amount: (await t.contract.balanceOf!(wallet.address)) as bigint })),
@@ -278,10 +379,17 @@ export function createDeposits(ctx: DepositContext) {
       const recipients = held.map((t) => ({ tokenAddress: t.address, amount: t.amount, recipientAddress: ctx.railgunAddress }));
       const estimate = () =>
         gasEstimateForShield(TXIDVersion.V2_PoseidonMerkle, NETWORK, shieldPrivateKey, recipients, [], wallet.address);
-      // One retry: a lagging RPC node can still fail the first estimate.
+      // Retries: a lagging RPC node can still fail the estimate ("allowance" revert seen live 13 Nov 2026,
+      // after the approval was visible on another node). Nothing is sent by an estimate.
       const { gasEstimate } = await estimate().catch(async () => {
-        await new Promise((r) => setTimeout(r, 5_000));
-        return estimate();
+        for (let i = 0; ; i++) {
+          await new Promise((r) => setTimeout(r, 5_000));
+          try {
+            return await estimate();
+          } catch (e) {
+            if (i >= 3) throw e;
+          }
+        }
       });
       const fees = await provider.getFeeData();
       const { transaction } = await populateShield(TXIDVersion.V2_PoseidonMerkle, NETWORK, shieldPrivateKey, recipients, [], {

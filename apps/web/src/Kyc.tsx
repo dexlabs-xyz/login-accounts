@@ -7,6 +7,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api.ts';
+import { useToastWhile } from './ui/toast.tsx';
+import { Modal } from './ui/Modal.tsx';
+import { Skeleton } from 'skullet/react';
 
 /**
  * The Sumsub SDK is third-party code, and this page also unlocks the wallet.
@@ -38,8 +41,10 @@ type KycView =
       mode: 'webhook' | 'polling';
       level: Level | null;
       verifiedHuman: boolean;
-      /** Local development only: the simulated-review test panel is available. */
+      /** The "skip the face check" panel is on (KYC_SIMULATE=1, sandbox only). */
       simulate: boolean;
+      /** Sumsub has created this account's applicant, so a simulated result can be recorded. */
+      applicantReady: boolean;
       /** The levels set up at Sumsub, in order. */
       levels: Level[];
       attempt: { level: Level; state: AttemptState; reason: Reason | null } | null;
@@ -52,9 +57,10 @@ const LEVEL_INFO: Record<Level, { title: string; what: string; time: string }> =
 };
 
 /**
- * SIMULATED REVIEW RESULTS, local development only. The sandbox liveness check
- * needs a real face, and nobody's real face goes into the sandbox, so this
- * panel asks Sumsub's sandbox to record a result instead.
+ * SIMULATED REVIEW RESULTS (sandbox only, on when the server sets
+ * KYC_SIMULATE=1). The sandbox liveness check needs a real face. This panel
+ * lets people skip it and ask Sumsub's sandbox to record a result instead.
+ * "Pass" comes first. The others are for testing the retry and reject paths.
  */
 const SIMULATED: { result: string; label: string }[] = [
   { result: 'pass', label: 'Pass' },
@@ -63,6 +69,17 @@ const SIMULATED: { result: string; label: string }[] = [
   { result: 'duplicate', label: 'Reject: duplicate face' },
   { result: 'fraud', label: 'Reject: suspected fraud' },
 ];
+
+/**
+ * Levels offered in the app. Decision, team lead, 9 Nov 2026: Verified address
+ * (L3) stays hidden until dexlabs is verified at Sumsub and on its Pro plan.
+ */
+const OFFERED: readonly Level[] = ['L1', 'L2'];
+
+const ORDER: readonly Level[] = ['L1', 'L2', 'L3'];
+/** Row names on the Verification page (Gold's Figma). */
+const ROW_TITLE: Record<Level, string> = { L1: 'Liveness check (L1)', L2: 'ID verification (L2)', L3: 'Proof of address (L3)' };
+const POPUP_TITLE: Record<Level, string> = { L1: 'Verify you’re human', L2: 'Verify your identity', L3: 'Verify your address' };
 
 const next = (level: Level | null): Level | null => (level === null ? 'L1' : level === 'L1' ? 'L2' : level === 'L2' ? 'L3' : null);
 
@@ -98,19 +115,24 @@ function explainKyc(err: unknown): string {
       'verification-closed': 'This verification can’t be retried.',
       'signed-out': 'You’ve been signed out. Sign in again.',
       'level-unavailable': 'This step isn’t available yet.',
-      'not-started': 'Sumsub hasn’t created the test applicant yet. Click Continue in the window above first.',
+      'not-started': 'Sumsub is still setting up your test check. Try again in a moment.',
+      'too-many-simulations': 'You’ve recorded a lot of simulated results this hour. Try again later.',
     };
     return m[err.code] ?? 'Something went wrong. Try again.';
   }
   return 'Something went wrong. Try again.';
 }
 
-export function KycCard() {
+/** What the account page shows at the top: verified human or not, and whether it's test mode. */
+export type KycStatus = { verifiedHuman: boolean; sandbox: boolean } | null;
+
+export function KycCard({ onStatus }: { onStatus?: (s: KycStatus) => void } = {}) {
   const [view, setView] = useState<KycView | null>(null);
   const [stage, setStage] = useState<'idle' | 'before' | 'widget'>('idle');
   const [target, setTarget] = useState<Level | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useToastWhile(error, { id: 'kyc-error', kind: 'error' });
   const container = useRef<HTMLDivElement>(null);
   const sdk = useRef<{ destroy(): void } | null>(null);
   const [widget, setWidget] = useState<{ level: Level; token: string; polling: boolean; sdk: SnsWebSdk } | null>(null);
@@ -125,6 +147,11 @@ export function KycCard() {
       return null;
     }
   }, []);
+
+  // Tell the page whenever the result changes (loaded, refreshed, or a simulated result).
+  useEffect(() => {
+    if (view) onStatus?.(view.available ? { verifiedHuman: view.verifiedHuman, sandbox: view.sandbox } : null);
+  }, [view, onStatus]);
 
   useEffect(() => {
     void load();
@@ -197,6 +224,20 @@ export function KycCard() {
     };
   }, [stage, widget, load]);
 
+  // Hosted: Sumsub links the applicant through a webhook a moment after the
+  // widget opens. Until it does, check every 2 seconds (for up to 1 minute) so
+  // the "skip the face check" buttons appear as soon as they can work.
+  const waitingForApplicant = stage === 'widget' && view?.available && view.simulate && !view.applicantReady;
+  useEffect(() => {
+    if (!waitingForApplicant) return;
+    let n = 0;
+    const t = setInterval(() => {
+      if (++n > 30) return clearInterval(t);
+      void load();
+    }, 2000);
+    return () => clearInterval(t);
+  }, [waitingForApplicant, load]);
+
   const simulate = async (result: string) => {
     setError('');
     setBusy(true);
@@ -212,139 +253,173 @@ export function KycCard() {
     }
   };
 
+  const shell = (rows: React.ReactNode, note?: React.ReactNode) => (
+    // Gold's Figma (Verify Identity, 566:10028 / 566:10029): rows like Settings, a line on what apps see, and the
+    // sandbox note at the bottom of the page.
+    <section className="kyc" aria-labelledby="kyc-h">
+      <h2 id="kyc-h" className="visually-hidden">
+        Verification
+      </h2>
+      <div className="kyc-top">{rows}</div>
+      {note}
+    </section>
+  );
+
   if (!view) {
-    return (
-      <section className="card" aria-labelledby="kyc-h">
-        <h2 id="kyc-h">Verification</h2>
-        <p className="muted">Loading…</p>
-        {error && <p className="error" role="alert">{error}</p>}
-      </section>
+    return shell(
+      <Skeleton loading label="Loading your verification">
+        <div className="set-group">
+          {(['Liveness check (L1)', 'ID verification (L2)', 'Proof of address (L3)'] as const).map((t) => (
+            <div key={t} className="set-row">
+              <span>{t}</span>
+              <span>Verified</span>
+            </div>
+          ))}
+        </div>
+      </Skeleton>,
     );
   }
 
   if (!view.available) {
-    return (
-      <section className="card" aria-labelledby="kyc-h">
-        <h2 id="kyc-h">Verification</h2>
-        <p className="muted">Verification isn’t set up on this server.</p>
-      </section>
+    return shell(
+      <div className="set-group">
+        <div className="set-row">
+          <span>Verification isn’t set up on this server.</span>
+        </div>
+      </div>,
     );
   }
 
   const following = next(view.level);
-  const nextLevel = following && view.levels.includes(following) ? following : null;
+  const nextLevel = following && view.levels.includes(following) && OFFERED.includes(following) ? following : null;
   const a = view.attempt;
   const current = a && a.state !== 'passed' && a.level === nextLevel ? a : null;
+  const reached = (l: Level) => !!view.level && ORDER.indexOf(view.level) >= ORDER.indexOf(l);
+  const open = (l: Level) => {
+    setTarget(l);
+    setStage('before');
+  };
 
-  return (
-    <section className="card" aria-labelledby="kyc-h">
-      <h2 id="kyc-h">Verification</h2>
-      <p className="warning small" role="note">
-        <strong>Sandbox (test mode).</strong> No real checks happen here. Don’t use your real face or a real ID document.
-      </p>
-
-      {view.level ? (
-        <p>
-          <strong>{LEVEL_INFO[view.level].title}</strong> ({view.level}). Apps you sign in to see “verified human”. They see your
-          level only if you allow it for that app.
-        </p>
-      ) : (
-        <p className="muted">
-          Optional. Verifying lets apps know you’re a real person, without them learning who you are. Everything in Login works
-          without it.
-        </p>
-      )}
-
-      {stage === 'before' && target && (
-        <div>
-          <p>
-            <strong>{LEVEL_INFO[target].title}</strong> takes {LEVEL_INFO[target].time}. You’ll record {LEVEL_INFO[target].what}.
-          </p>
-          <p className="muted small">
-            This goes to Sumsub, our verification partner, not to Login. Login only learns whether you passed. You may be asked for
-            camera access. On a computer without a camera, you can continue on your phone with a QR code.
-          </p>
-          <div className="row">
-            <button disabled={busy} onClick={() => void launch(target)}>
-              Continue
+  /** What each row shows on its right: Verified, a button, or why not yet. */
+  const status = (l: Level): React.ReactNode => {
+    if (reached(l)) return <span className="set-value set-ok">Verified</span>;
+    if (!OFFERED.includes(l) || !view.levels.includes(l)) return <span className="set-value kyc-soon">Coming soon</span>;
+    if (l !== nextLevel) return <span className="set-value kyc-soon">After {ORDER[ORDER.indexOf(l) - 1]}</span>;
+    switch (current?.state) {
+      case 'in-review':
+        return (
+          <span className="set-actions">
+            <span className="kyc-soon" role="status">
+              Checking…
+            </span>
+            <button className="set-btn" disabled={busy} onClick={() => void load(true)}>
+              Check again
             </button>
-            <button className="link" onClick={() => setStage('idle')}>
-              Not now
-            </button>
-          </div>
-        </div>
-      )}
-
-      {stage === 'widget' && (
-        <div>
-          <div ref={container} id="sumsub-websdk-container" />
-          {view.simulate && (
-            <div className="warning small" role="group" aria-label="Simulated result">
-              <p>
-                <strong>Test panel (local development only).</strong> Sumsub’s sandbox can’t check a face without a real one.
-                Open the step above until it asks for the camera, then pick the result Sumsub should record.
-              </p>
-              <div className="row">
-                {SIMULATED.map((m) => (
-                  <button key={m.result} disabled={busy} onClick={() => void simulate(m.result)}>
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <button className="link" onClick={() => void closeWidget()}>
-            Close. You can come back to this later.
-          </button>
-        </div>
-      )}
-
-      {stage === 'idle' && current?.state === 'in-review' && (
-        <div role="status">
-          <p>Checking your {LEVEL_INFO[current.level].title.toLowerCase()} submission. This usually takes under a minute.</p>
-          <button disabled={busy} onClick={() => void load(true)}>
-            Check again
-          </button>
-        </div>
-      )}
-
-      {stage === 'idle' && current?.state === 'retry' && (
-        <div role="status">
-          <p>{retryMessage(current.reason)}</p>
-          <button disabled={busy} onClick={() => void launch(current.level)}>
+          </span>
+        );
+      case 'retry':
+        return (
+          <button className="set-btn" disabled={busy} onClick={() => void launch(l)} title={retryMessage(current.reason)}>
             Try again
           </button>
-        </div>
-      )}
-
-      {stage === 'idle' && current?.state === 'final' && (
-        <p className="info" role="status">
-          {finalMessage(current.reason)}
-        </p>
-      )}
-
-      {stage === 'idle' && current?.state === 'in-progress' && (
-        <div>
-          <p className="muted">You started {LEVEL_INFO[current.level].title.toLowerCase()} but didn’t finish.</p>
-          <button disabled={busy} onClick={() => void launch(current.level)}>
-            Continue where you left off
+        );
+      case 'final':
+        return <span className="set-value kyc-soon">Can’t be completed</span>;
+      case 'in-progress':
+        return (
+          <button className="set-btn" disabled={busy} onClick={() => void launch(l)}>
+            Continue
           </button>
+        );
+      default:
+        return (
+          <button className="set-btn" disabled={busy} onClick={() => open(l)}>
+            Verify
+          </button>
+        );
+    }
+  };
+
+  return (
+    <>
+      {shell(
+        <>
+          <div className="set-group">
+            {ORDER.map((l) => (
+              <div key={l} className="set-row" data-level={l}>
+                <span>{ROW_TITLE[l]}</span>
+                {status(l)}
+              </div>
+            ))}
+          </div>
+          <p className="kyc-caption">
+            {current?.state === 'final'
+              ? finalMessage(current.reason)
+              : current?.state === 'retry'
+                ? retryMessage(current.reason)
+                : 'Apps you sign in to with Login see only that you’re a verified human, never which steps you did.'}
+          </p>
+        </>,
+        <p className="kyc-note" role="note">
+          NOTE: The results aren’t real identity checks. If you do the real check, your camera images and documents go to Sumsub’s test
+          environment, not to Login.{view.simulate && <> Prefer not to? Use “Skip the face check”.</>}
+        </p>,
+      )}
+
+      {/* Starting a check: what to expect, then Sumsub's window, in a pop-up like Send and Receive. */}
+      <Modal open={stage !== 'idle'} title={target ? POPUP_TITLE[target] : 'Verify'} onClose={() => (stage === 'widget' ? void closeWidget() : setStage('idle'))} bare wide={stage === 'widget'}>
+        <div className="sheet">
+          <header className="sheet-head">
+            <h2>{target ? POPUP_TITLE[target] : 'Verify'}</h2>
+          </header>
+          {stage === 'before' && target && (
+            <>
+              <p className="sheet-sub">Takes {LEVEL_INFO[target].time}</p>
+              <div className="sheet-body">
+                <p>You’ll record {LEVEL_INFO[target].what}.</p>
+                <p className="sheet-note">
+                  This goes to Sumsub, our verification partner, not to Login. Login only learns whether you passed. You may be asked for
+                  camera access. On a computer without a camera, you can continue on your phone with a QR code.
+                </p>
+                <div className="sheet-actions">
+                  <button type="button" className="sheet-btn" onClick={() => setStage('idle')}>
+                    Not now
+                  </button>
+                  <button type="button" className="sheet-btn is-primary" disabled={busy} aria-busy={busy} onClick={() => void launch(target)}>
+                    Continue
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+          {stage === 'widget' && (
+            <div className="sheet-body">
+              <div ref={container} id="sumsub-websdk-container" />
+              {view.simulate && (
+                <div className="kyc-skip" role="group" aria-labelledby="kyc-skip-h">
+                  <p id="kyc-skip-h">Skip the face check: record a simulated result (sandbox only)</p>
+                  {view.applicantReady ? (
+                    <div className="set-actions kyc-skip-actions">
+                      {SIMULATED.map((m) => (
+                        <button key={m.result} className="set-btn" disabled={busy} onClick={() => void simulate(m.result)}>
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="sheet-note" role="status">
+                      Starting… one moment
+                    </p>
+                  )}
+                </div>
+              )}
+              <button type="button" className="sheet-btn" onClick={() => void closeWidget()}>
+                Close. You can come back to this later.
+              </button>
+            </div>
+          )}
         </div>
-      )}
-
-      {stage === 'idle' && nextLevel && !current && (
-        <button
-          disabled={busy}
-          onClick={() => {
-            setTarget(nextLevel);
-            setStage('before');
-          }}
-        >
-          {view.level ? `Add ${LEVEL_INFO[nextLevel].title.toLowerCase()} (${nextLevel})` : `Verify you’re human (${LEVEL_INFO.L1.time})`}
-        </button>
-      )}
-
-      {error && <p className="error" role="alert">{error}</p>}
-    </section>
+      </Modal>
+    </>
   );
 }

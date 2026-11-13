@@ -4,7 +4,7 @@
  * TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, recordSecrets, signUp } from './helpers.ts';
+import { Device, disableAutofill, recordSecrets, signUp, toastWith, unlockWallet } from './helpers.ts';
 
 test.describe.configure({ timeout: 5 * 60_000 });
 
@@ -45,12 +45,13 @@ test('a stalled sync says so and recovers with Retry', async ({ page }) => {
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByText('Syncing is taking longer than usual')).toBeVisible({ timeout: 120_000 });
-  await expect(card.getByText('Your funds aren’t affected.')).toBeVisible();
+  const stalled = toastWith(page, 'Syncing is taking longer than usual');
+  await expect(stalled).toBeVisible({ timeout: 120_000 });
+  await expect(stalled).toContainText('Your funds aren’t affected.');
 
   // Service back: Retry finishes the sync.
   await page.context().unroute('**/rail-squid.squids.live/**');
-  await card.getByRole('button', { name: 'Retry sync' }).click();
+  await stalled.getByRole('button', { name: 'Retry sync' }).click();
   await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 });
 
@@ -62,9 +63,9 @@ test('same passkey, same Railgun address after locking and unlocking', async ({ 
   await expect(address).toHaveText(/^0zk/, { timeout: 120_000 });
   const first = await address.getAttribute('title');
 
-  await page.getByRole('button', { name: 'Lock' }).click();
-  await expect(card).toHaveCount(0); // worker terminated, nothing shown while locked
-  await page.getByRole('button', { name: 'Unlock with passkey' }).click();
+  await page.reload(); // locks the wallet (Settings has no Lock button in Gold's Figma)
+  await expect(address).toHaveCount(0); // worker terminated: no address (the page keeps its layout behind the unlock pop-up)
+  await unlockWallet(page);
   await expect(address).toHaveText(/^0zk/, { timeout: 120_000 });
   expect(await address.getAttribute('title')).toBe(first);
 });

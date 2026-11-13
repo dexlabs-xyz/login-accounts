@@ -23,10 +23,12 @@ import { higher, outcomeOf, rank, type AttemptState, type Reason } from './outco
 import { isApplicantId, verifyWebhook, type ReviewStatus, type SimulatedReview, type SumsubClient } from './sumsub.ts';
 
 /**
- * SIMULATED REVIEW RESULTS (sandbox + localhost only). The sandbox liveness
- * check needs a real face, and nobody's real face goes into the sandbox. So in
- * local development a test panel asks Sumsub's sandbox to record a result for
- * the test applicant. Login then reads it back through the normal status API.
+ * SIMULATED REVIEW RESULTS (sandbox only, on with KYC_SIMULATE=1). The
+ * sandbox liveness check needs a real face. So that nobody has to use theirs,
+ * a clearly labelled panel lets the user skip the camera and ask Sumsub's
+ * sandbox to record a result for their test applicant. Login then reads it
+ * back through the normal status API. Apps still receive
+ * `verification_sandbox: true`, so a simulated pass is always labelled.
  */
 export const SIMULATED_REVIEWS: Record<string, SimulatedReview> = {
   pass: { answer: 'GREEN' },
@@ -51,7 +53,14 @@ type StatusRow = {
 };
 type LinkRow = { user_id: string; external_user_id: string; applicant_id: string | null };
 
-const fail = (c: Context, status: 400 | 403 | 404 | 409 | 502 | 503, error: string) => c.json({ error }, status);
+/**
+ * Each account may record this many simulated results per hour, so a public
+ * demo can't use up the sandbox's API quota. Kept in memory, so it resets
+ * when the server restarts. That's fine for a demo limit.
+ */
+export const SIMULATE_LIMIT = { max: 10, windowMs: 60 * 60_000 };
+
+const fail = (c: Context, status: 400 | 403 | 404 | 409 | 429 | 502 | 503, error: string) => c.json({ error }, status);
 
 /** KYC component, mounted by ../app.ts. Tables: migrations/0003_kyc_initial.ts. */
 export function kycRoutes({
@@ -59,17 +68,16 @@ export function kycRoutes({
   kyc,
   session,
   now,
-  localDev = false,
 }: {
   db: DB;
   kyc: KycDeps | null;
   /** The signed-in account, or throws 401 (passkeys/session.ts). */
   session: (c: Context) => { user: { id: string } };
   now: () => number;
-  /** True only when the RP ID is localhost. Turns on the simulated-review panel. */
-  localDev?: boolean;
 }): Hono {
   const app = new Hono();
+  /** Times of recent simulated results, per account (see SIMULATE_LIMIT). */
+  const simulateCalls = new Map<string, number[]>();
 
   const statusOf = (userId: string) =>
     db.prepare('SELECT * FROM kyc_status WHERE user_id = ?').get(userId) as StatusRow | undefined;
@@ -117,13 +125,20 @@ export function kycRoutes({
   /** What the account page shows. No Sumsub IDs, ever. */
   const view = (userId: string) => {
     const s = statusOf(userId);
+    const simulate = kyc!.config.simulate;
     return {
       available: true,
       sandbox: true,
       mode: kyc!.config.webhookSecret ? 'webhook' : 'polling',
       level: s?.level ?? null,
       verifiedHuman: rank(s?.level ?? null) >= 1,
-      simulate: localDev,
+      simulate,
+      /**
+       * Whether Sumsub has created this account's applicant yet (hosted: the
+       * applicantCreated webhook). The simulated-result buttons wait for it.
+       * A yes/no only: the applicant ID itself is never returned.
+       */
+      applicantReady: simulate && Boolean(linkOf(userId)?.applicant_id),
       levels: kyc!.config.enabledLevels,
       attempt: s?.attempt_level
         ? { level: s.attempt_level, state: s.attempt_state, reason: s.attempt_reason }
@@ -229,15 +244,21 @@ export function kycRoutes({
     return c.json(view(s.user.id));
   });
 
-  /** SIMULATED REVIEW RESULTS: see SIMULATED_REVIEWS above. Localhost only. */
+  /** SIMULATED REVIEW RESULTS: see SIMULATED_REVIEWS above. Only with KYC_SIMULATE=1. */
   app.post('/api/kyc/simulate', async (c) => {
     const s = session(c);
-    if (!kyc || !localDev) return fail(c, 404, 'not-found');
+    if (!kyc?.config.simulate) return fail(c, 404, 'not-found');
     const body = (await c.req.json().catch(() => ({}))) as { result?: unknown };
     const review = typeof body.result === 'string' && Object.hasOwn(SIMULATED_REVIEWS, body.result) ? SIMULATED_REVIEWS[body.result] : null;
     if (!review) return fail(c, 400, 'invalid-result');
     const link = linkOf(s.user.id);
     if (!link?.applicant_id) return fail(c, 409, 'not-started');
+    // Only calls that would reach Sumsub count towards the limit.
+    const t = now();
+    const recent = (simulateCalls.get(s.user.id) ?? []).filter((at) => t - at < SIMULATE_LIMIT.windowMs);
+    if (recent.length >= SIMULATE_LIMIT.max) return fail(c, 429, 'too-many-simulations');
+    recent.push(t);
+    simulateCalls.set(s.user.id, recent);
     try {
       await kyc.sumsub.simulateReview(link.applicant_id, review);
       await refreshFromSumsub(s.user.id);

@@ -1,5 +1,5 @@
 /**
- * TESTNET ONLY. "Get test funds": a signed-in account claims 1,000 test USDT
+ * TESTNET ONLY. "Get test funds": a signed-in account claims 250 test USDT
  * (plus a small hidden fee reserve) from the pool, once.
  *
  * An exception to D6, by design (team lead, 6 Nov 2026): to send a claim the

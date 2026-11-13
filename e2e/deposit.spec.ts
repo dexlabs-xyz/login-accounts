@@ -7,7 +7,7 @@
 import { expect, test } from '@playwright/test';
 import { generateKeyPairSync } from 'node:crypto';
 import { Contract, JsonRpcProvider, Wallet, encodeBase58, parseUnits } from 'ethers';
-import { Device, disableAutofill, recordSecrets, signUp } from './helpers.ts';
+import { Device, disableAutofill, openSheet, recordSecrets, signUp } from './helpers.ts';
 
 const RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const TIDEPOOL = 'https://www.usetidepool.tech';
@@ -45,7 +45,7 @@ test('EVM: ETH and USDC sent to one address → swapped through Tidepool → pri
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
   await expect(card.getByTestId('fee-reserve-empty')).toBeVisible();
 
   // The sending wallet: ETH from our testnet faucet, test USDC from Tidepool's faucet.
@@ -56,8 +56,9 @@ test('EVM: ETH and USDC sent to one address → swapped through Tidepool → pri
   await expect.poll(async () => ((await usdc.balanceOf!(sender.address)) as bigint) >= parseUnits('1', 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
 
   // Add money → From an Ethereum wallet: one address, no token or amount to pick.
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Ethereum Sepolia' }).click();
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
   expect(to).toMatch(/^0x[0-9a-fA-F]{40}$/);
   await expect(add.getByText('Only these three tokens')).toBeVisible();
@@ -93,15 +94,16 @@ test('EVM: USDT sent to the address goes straight in, no swap', async ({ page })
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 
   expect((await page.request.post('/api/testnet-gas', { data: { address: sender.address } })).ok()).toBe(true);
   expect((await page.request.post(`${TIDEPOOL}/v0/faucet`, { data: { chain: 'eth', address: sender.address } })).ok()).toBe(true);
   await expect.poll(async () => (await provider.getBalance(sender.address)) > 0n, { timeout: 180_000, intervals: [5_000] }).toBe(true);
   await expect.poll(async () => ((await usdt.balanceOf!(sender.address)) as bigint) >= parseUnits('2', 6), { timeout: 180_000, intervals: [5_000] }).toBe(true);
 
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Ethereum Sepolia' }).click();
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
   const tx = await usdt.transfer!(to, parseUnits('2', 6));
   await tx.wait(1);
@@ -115,14 +117,15 @@ test('EVM: USDT sent to the address goes straight in, no swap', async ({ page })
 test('Solana devnet: asks for a refund address, then gets a Solana deposit address', async ({ page }) => {
   await Device.add(page);
   await signUp(page);
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From Solana' }).click({ timeout: 240_000 });
-  await add.getByLabel('Send from').selectOption({ label: 'USDC on Solana devnet' }, { timeout: 60_000 });
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Solana', exact: true }).click({ timeout: 240_000 });
+  await add.getByLabel('Select token').selectOption({ label: 'USDC on Solana devnet' }, { timeout: 60_000 });
   await add.getByLabel('Amount').fill('1');
 
-  const refund = add.getByLabel(/Your Solana address/);
+  const refund = add.getByLabel(/Refund address/);
   await refund.fill('0x1111111111111111111111111111111111111111'); // an Ethereum address: refused
-  await expect(add.getByText('That isn’t a Solana address.')).toBeVisible();
+  await expect(refund).toHaveAttribute('aria-invalid', 'true'); // red at once; the error toast comes when you leave the field
   await expect(add.getByRole('button', { name: 'Get deposit address' })).toBeDisabled();
 
   // A throwaway Solana public key (32-byte ed25519, base58), testnet only.
@@ -130,7 +133,7 @@ test('Solana devnet: asks for a refund address, then gets a Solana deposit addre
   await refund.fill(encodeBase58(raw));
   await add.getByRole('button', { name: 'Get deposit address' }).click();
   await expect(add.getByTestId('tidepool-deposit-address')).toHaveText(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, { timeout: 60_000 });
-  await expect(add.getByText(/Send exactly .* USDC/)).toBeVisible();
+  await expect(add.getByText(/only send USDC on Solana devnet, the exact amount above/)).toBeVisible(); // redesign: an Amount row + this note
   await expect(add.getByText('Solana devnet', { exact: true })).toBeVisible();
 });
 
@@ -141,7 +144,7 @@ test('EVM: more ETH than Tidepool takes in one swap (0.006) is split into severa
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 
   // Three throwaway senders, each with 0.004 ETH from our testnet faucet (testnet only).
   const senders = [0, 1, 2].map(() => Wallet.createRandom().connect(provider));
@@ -150,8 +153,9 @@ test('EVM: more ETH than Tidepool takes in one swap (0.006) is split into severa
     await expect.poll(async () => (await provider.getBalance(s.address)) >= parseUnits('0.004', 18), { timeout: 180_000, intervals: [5_000] }).toBe(true);
   }
 
-  const add = page.getByRole('region', { name: /Add money/ });
-  await add.getByRole('button', { name: 'From an Ethereum wallet' }).click();
+  await openSheet(page, 'Receive'); // Add money sits in the Receive pop-up until it's redesigned
+  const add = page.getByRole('dialog', { name: 'Receive' });
+  await add.getByRole('button', { name: 'Ethereum Sepolia' }).click();
   const to = (await add.getByTestId('tidepool-deposit-address').textContent({ timeout: 60_000 }))!.trim();
 
   // 3 x 0.0039 = 0.0117 ETH. After 0.001 gas and a 0.001 fee reserve, ~0.0097 is swapped: 0.006 + ~0.0037.

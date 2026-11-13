@@ -58,6 +58,32 @@ export interface DepositSwap {
   status: 'quoted' | 'sent' | 'success' | 'refunded' | 'failed';
 }
 
+/**
+ * A withdrawal that arrives as another token or on another chain: the private
+ * USDT is withdrawn straight to Tidepool's one-time swap address, and Tidepool
+ * delivers the chosen token to the user's address. If the swap fails, Tidepool
+ * refunds the USDT to this record's fresh deposit address, which then moves it
+ * back into the private balance like any deposit.
+ */
+export interface WithdrawalSwap {
+  tidepoolDepositAddress: string;
+  /** Destination chain and token (Tidepool's names, e.g. 'sol', 'USDC'). */
+  chain: string;
+  symbol: string;
+  decimals: number;
+  /** The user's address on the destination chain. */
+  to: string;
+  /** USDT leaving the private balance, and arriving at Tidepool after Railgun's fee (smallest units). */
+  amountUsdt: string;
+  sentUsdt: string;
+  /** What Tidepool quoted, in the destination token's smallest units. */
+  expectedOut: string;
+  minOut: string;
+  deadline: string;
+  txHash?: string;
+  status: 'sending' | 'sent' | 'success' | 'refunded' | 'failed';
+}
+
 export interface DepositRecord {
   index: number;
   /** The fresh Sepolia address (m/44'/60'/0'/0/index) that receives the USDT. */
@@ -74,6 +100,16 @@ export interface DepositRecord {
   userEthWei?: string;
   /** EVM deposits: swaps into USDT, in order. Kept so a reload never sends twice. */
   swaps?: DepositSwap[];
+  /**
+   * Public addresses that sent money to this deposit address (lowercase), so a
+   * withdrawal back to one can be flagged: anyone can link the two on-chain.
+   * Found on this device from public chain data; stored only here, encrypted.
+   */
+  funders?: string[];
+  /** Last block already searched for token transfers in (so a rescan doesn't repeat work). */
+  fundersCheckedBlock?: number;
+  /** Set when this fresh address is the refund address of a swapped withdrawal. */
+  withdrawal?: WithdrawalSwap;
   createdAt: number;
   updatedAt: number;
 }
@@ -88,7 +124,31 @@ export type DepositMethod =
   | 'deposit.rescan'
   | 'fees'
   | 'send.quote'
-  | 'send.execute';
+  | 'send.execute'
+  | 'history';
+
+/**
+ * One line of the account's history, built in the wallet worker from Railgun's
+ * own transaction history (decrypted with this wallet's keys, on this device).
+ * Amounts in the token's smallest units. Never sent anywhere.
+ */
+export interface HistoryEntry {
+  /** Ethereum transaction hash. */
+  txid: string;
+  /** Unix seconds, when known. */
+  timestamp: number | null;
+  kind: 'deposit' | 'received' | 'sent' | 'withdrew' | 'other';
+  /**
+   * Money that came in: still in Railgun's privacy check, spendable (or already
+   * spent since), or blocked by sanctions screening. Null for money that went out.
+   */
+  status: 'checking' | 'spendable' | 'blocked' | null;
+  amounts: { tokenAddress: string; amount: string }[];
+  /** Withdrawals: Railgun's fee per token (amounts above are what arrived). */
+  fees?: { tokenAddress: string; amount: string }[];
+  /** Who it went to (0zk for a private send, 0x for a withdrawal), when known. */
+  to: string | null;
+}
 
 export type ToWorker =
   /** rootSecret is transferred (not copied): the page's copy is wiped by the transfer. */

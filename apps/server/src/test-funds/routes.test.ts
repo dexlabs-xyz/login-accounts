@@ -77,7 +77,7 @@ describe('test funds (testnet only, exception to D6)', () => {
     await flush();
     expect(sent).toEqual([ZK]);
     const view = await (await app.request('/api/test-funds', { headers: { cookie } })).json();
-    expect(view).toMatchObject({ enabled: true, simulation: true, amountUsdt: '1000', status: 'sent', txHash: '0xpooltx' });
+    expect(view).toMatchObject({ enabled: true, simulation: true, amountUsdt: '250', status: 'sent', txHash: '0xpooltx' });
     expect((await claim(app, cookie)).status).toBe(409); // never twice
     expect(sent).toHaveLength(1);
   });
