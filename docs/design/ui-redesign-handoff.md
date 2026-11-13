@@ -17,6 +17,9 @@ changes **how things look and move**, not what they do or say about safety.
 - `apps/web/src/styles.css`: all styling. Colour tokens and dark mode live here.
 - The consent screen for other apps is server-rendered HTML in
   `apps/server/src/oidc/provider.ts` (the `page(...)` calls).
+  Restyled 13 Nov (Gold): `PAGE_CSS` (inline, Geist from /fonts, follows the device's dark/light), a
+  heart-handshake icon, "<App> would like you to sign in with Login", a box of what the app sees. CSP adds
+  `font-src 'self'` only. The page must never contain the email or a KYC level (routes.test.ts).
 
 ## Don't touch
 

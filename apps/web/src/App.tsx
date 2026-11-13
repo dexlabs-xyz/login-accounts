@@ -364,12 +364,9 @@ function Main() {
     await refresh();
   };
 
-  if (me === 'loading')
-    return (
-      <Shell>
-        <p className="muted">Loading…</p>
-      </Shell>
-    );
+  // Checking whether you're signed in: just the page colour (Gold, 13 Nov). It's usually a split second, and the old
+  // "Login / Loading… / Testnet build" screen flashed in a different style before Welcome or Home.
+  if (me === 'loading') return <main className="blank" aria-busy="true" aria-label="Loading" />;
   if (!me) return <Join onDone={onOutcome} />;
   return <Account me={me} note={note} setNote={setNote} refresh={refresh} />;
 }
@@ -897,21 +894,21 @@ function SignInHandoff() {
     api('GET', '/api/me').then(complete, () => setState('sign-in'));
   }, [valid, fresh, complete]);
 
+  // Same look as Welcome (Gold, 13 Nov), not the old plain screen.
   if (!valid) {
     return (
-      <Shell>
-        <h1>This sign-in link doesn’t work</h1>
-        <p role="alert" className="error">
+      <Welcome heading="This sign-in link doesn’t work" learnMore={false}>
+        <p className="welcome-lead" role="alert">
           Go back to the app you came from and try signing in again.
         </p>
-      </Shell>
+      </Welcome>
     );
   }
   if (state !== 'sign-in') {
     return (
-      <Shell>
-        <p className="muted">{state === 'leaving' ? 'Taking you back to the app…' : 'Checking…'}</p>
-      </Shell>
+      <Welcome heading={state === 'leaving' ? 'Taking you back to the app…' : 'Checking…'} learnMore={false}>
+        <img className="welcome-spinner" src="/img/loader-spinning.svg" alt="" width={28} height={28} />
+      </Welcome>
     );
   }
   return (
