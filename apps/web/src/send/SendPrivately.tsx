@@ -28,7 +28,7 @@ const ERRORS: Record<string, string> = {
   'own-deposit-address':
     'That’s one of your own Login deposit addresses. It’s publicly linked to your deposits, so withdrawing there would undo the privacy. Use a different address.',
   'insufficient-usdt':
-    'You don’t have that much spendable USDT. New deposits become spendable once their privacy check clears. What’s left over after a send stays locked on this test network, so add money to send more.',
+    'You don’t have that much spendable USDT. New deposits become spendable once their privacy check clears. What’s left over after a send stays locked: a real Railgun testnet bug we haven’t found a workaround for.',
   'insufficient-fee-balance':
     'There’s nothing spendable to pay the network fee, so nothing was sent. On this test network, what’s left after a send or withdrawal stays locked, so each deposit covers one transaction. Add money (for example 0.003 ETH from Add money), or if a deposit is still being checked, try again once it clears.',
   'no-broadcaster': 'No network relay is available right now. Try again in a minute.',
@@ -41,6 +41,9 @@ const ERRORS: Record<string, string> = {
   'Wallet locked.': 'Your wallet locked. Unlock and try again.',
   'swap-mismatch': 'The swap quote didn’t match the withdrawal, so we stopped. Review it again.',
 };
+/** README › Known limit on Sepolia (the default branch, which is what judges read). */
+const KNOWN_LIMIT_URL = 'https://github.com/dexlabs-xyz/login-accounts#known-limit-on-sepolia-leftovers-stay-locked';
+
 const explain = (e: unknown, kind: Kind) =>
   (e instanceof TidepoolError &&
     (/capped/i.test(e.message)
@@ -174,8 +177,13 @@ export function SendPanel({
   const fail = (e: unknown, stage: string) => {
     const msg = explain(e, kind);
     setError(msg);
-    toast.show({ kind: 'error', text: msg });
     const m = e instanceof Error ? e.message : '';
+    // The Sepolia limit gets a link to the README's explanation (Gold, 13 Nov).
+    toast.show({
+      kind: 'error',
+      text: msg,
+      ...(m === 'insufficient-usdt' && { action: { label: 'Details on GitHub', onClick: () => window.open(KNOWN_LIMIT_URL, '_blank', 'noopener') } }),
+    });
     if (m === 'insufficient-usdt' || /capped/i.test(m)) setAmountBad(true);
     if (m === 'invalid-address' || m === 'own-deposit-address') setToBad(true);
     const d = import.meta.env.DEV && e instanceof Error ? (e as Error & { devDetail?: string }).devDetail : undefined;
