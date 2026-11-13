@@ -1,7 +1,7 @@
 /** TESTNET-ONLY test funds: the shield-fee gross-up and the "can the pool pay?" rule. */
 import { describe, expect, it } from 'vitest';
-import { grossForShield } from './pool.ts';
-import { canPayClaim, CLAIM_FEE_RESERVE_WEI, CLAIM_USDT } from './sender.ts';
+import { grossForPieces, grossForShield, splitIntoPieces } from './pool.ts';
+import { canPayClaim, CLAIM_FEE_RESERVE_WEI, CLAIM_PIECES, CLAIM_USDT, CLAIM_USDT_PIECES, CLAIM_WETH_PIECES } from './sender.ts';
 
 const ETH = 10n ** 18n;
 const fee = (gross: bigint, bp: bigint) => (gross * bp) / 10_000n; // Railgun: rounded down
@@ -29,7 +29,9 @@ describe('canPayClaim', () => {
   });
   it('refuses when USDT is short of 250 plus the fee', () => {
     expect(canPayClaim({ ...ok, usdt: CLAIM_USDT }, 25n)).toBe(false);
-    expect(canPayClaim({ ...ok, usdt: grossForShield(CLAIM_USDT, 25n) }, 25n)).toBe(true);
+    const gross = grossForPieces(CLAIM_USDT_PIECES, 25n); // each piece pays its own fee, rounded up
+    expect(canPayClaim({ ...ok, usdt: gross - 1n }, 25n)).toBe(false);
+    expect(canPayClaim({ ...ok, usdt: gross }, 25n)).toBe(true);
   });
   it('refuses when ETH would not cover the wrap plus gas', () => {
     expect(canPayClaim({ ...ok, eth: ETH / 100n }, 25n)).toBe(false); // 0.01: no room for gas
@@ -38,5 +40,30 @@ describe('canPayClaim', () => {
   it('already-wrapped WETH only needs gas', () => {
     expect(canPayClaim({ ...ok, weth: ETH / 100n, eth: (3n * ETH) / 1000n }, 25n)).toBe(true);
     expect(canPayClaim({ ...ok, weth: ETH / 100n, eth: (2n * ETH) / 1000n }, 25n)).toBe(false);
+  });
+});
+
+describe('claim pieces (one transaction each on Sepolia)', () => {
+  it('250 USDT is 5 different pieces of about 50 that add up exactly', () => {
+    expect(CLAIM_USDT_PIECES).toEqual([49_980_000n, 49_990_000n, 50_000_000n, 50_010_000n, 50_020_000n]);
+    expect(CLAIM_USDT_PIECES.reduce((a, b) => a + b, 0n)).toBe(CLAIM_USDT);
+  });
+  it('the fee reserve is 5 different pieces that add up to 0.001 ETH', () => {
+    expect(CLAIM_WETH_PIECES).toHaveLength(CLAIM_PIECES);
+    expect(new Set(CLAIM_WETH_PIECES).size).toBe(CLAIM_PIECES);
+    expect(CLAIM_WETH_PIECES.reduce((a, b) => a + b, 0n)).toBe(CLAIM_FEE_RESERVE_WEI);
+  });
+  it('splitIntoPieces keeps the total when it does not divide evenly, with no two pieces equal', () => {
+    for (const [total, count] of [[1_000_003n, 5], [101n, 4], [10n ** 18n + 7n, 3]] as const) {
+      const pieces = splitIntoPieces(total, count, 1n);
+      expect(pieces.reduce((a, b) => a + b, 0n)).toBe(total);
+      expect(new Set(pieces).size).toBe(count);
+    }
+  });
+  it('each piece arrives exactly after its own shield fee', () => {
+    for (const p of CLAIM_USDT_PIECES) {
+      const gross = grossForShield(p, 25n);
+      expect(gross - (gross * 25n) / 10_000n >= p).toBe(true);
+    }
   });
 });
