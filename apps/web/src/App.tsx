@@ -302,9 +302,9 @@ function PrivateBalance({
             ))}
           {pw.status === 'ready' && (
             <p
-              // "Network fees are covered." is the normal state, so it isn't shown (Gold, 13 Nov); kept for screen readers
-              // and the tests. Only a reserve that's still being set up shows.
-              className={reserveState === 'pending' || reserveState === 'used' ? 'hero-status' : 'visually-hidden'}
+              // Never shown (Gold, 13 Nov: people don't need to know about the fee reserve); kept for screen readers and the
+              // tests. If there's nothing to pay a fee with, the send's error toast says what to do.
+              className="visually-hidden"
               data-testid={`fee-reserve-${reserveState}`}
             >
               {reserveState === 'ready'

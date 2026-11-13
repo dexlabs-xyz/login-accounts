@@ -47,8 +47,12 @@ const short = (a: string) => (a.length > 16 ? `${a.slice(0, 8)}…${a.slice(-6)}
 
 /** "25 USDT". The hidden fee reserve (ETH) is left out unless it's the only thing that moved. */
 function amounts(list: HistoryEntry['amounts']): string {
-  const main = list.filter((a) => a.tokenAddress.toLowerCase() !== WETH);
-  const show = main.length ? main : list;
+  // One total per token: a test-funds claim arrives in 5 pieces, but it's "250 USDT", not 5 amounts (Gold, 13 Nov).
+  const totals = new Map<string, bigint>();
+  for (const a of list) totals.set(a.tokenAddress.toLowerCase(), (totals.get(a.tokenAddress.toLowerCase()) ?? 0n) + BigInt(a.amount));
+  const merged = [...totals].map(([tokenAddress, amount]) => ({ tokenAddress, amount: amount.toString() }));
+  const main = merged.filter((a) => a.tokenAddress !== WETH);
+  const show = main.length ? main : merged;
   return show
     .map((a) => {
       const t = TOKENS[a.tokenAddress.toLowerCase()];
