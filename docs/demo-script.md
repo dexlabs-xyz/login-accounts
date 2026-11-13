@@ -8,8 +8,9 @@ clear; see the README's known limit). So prepare two accounts a day ahead:
 - **Alice** (presenter) makes 3 transactions below (one send, two
   withdrawals), so she needs **3 separate deposits**: the test-funds claim
   plus **two** Ethereum deposits, each with about 0.003 ETH in it (the ETH
-  refills the hidden fee reserve that every transaction needs). Everything
-  shows **Spendable** and "Network fees are covered".
+  refills the hidden fee reserve that every transaction needs). She's ready
+  when Home shows only the balance: no "in privacy check" or "Network fees:
+  being set up" line under it.
 - **Bob** (second browser or phone): signed up; claimed test funds. He only
   receives, so one deposit is enough.
 - **Don't rehearse with Alice's account**: every practice send or withdrawal

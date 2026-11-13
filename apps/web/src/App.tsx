@@ -271,20 +271,28 @@ function PrivateBalance({
                 {pw.status === 'ready' ? 'No private funds yet.' : ''}
               </p>
             ) : (
-              <p className="hero-status">
-                {rows.map((r, i) => (
-                  <span key={r.bucket + r.tokenAddress}>
-                    {i > 0 && ' · '}
-                    <span data-testid={`balance-${r.bucket}-${tokenKey(r.tokenAddress)}`}>
-                      {money(r.tokenAddress, r.amount)} {BUCKET_LABELS[r.bucket]?.toLowerCase() ?? r.bucket}
+              // Only what isn't spendable yet shows (e.g. "in privacy check"): "$… spendable" just repeated the big
+              // number (Gold, 13 Nov). It stays for screen readers and the tests (balance-<Bucket>-<token>).
+              <p className={rows.some((r) => r.bucket !== 'Spendable') ? 'hero-status' : 'visually-hidden'}>
+                {rows.map((r) => {
+                  const shown = r.bucket !== 'Spendable';
+                  const first = shown && rows.find((x) => x.bucket !== 'Spendable') === r;
+                  return (
+                    <span key={r.bucket + r.tokenAddress} className={shown ? undefined : 'visually-hidden'}>
+                      {shown && !first && ' · '}
+                      <span data-testid={`balance-${r.bucket}-${tokenKey(r.tokenAddress)}`}>
+                        {money(r.tokenAddress, r.amount)} {BUCKET_LABELS[r.bucket]?.toLowerCase() ?? r.bucket}
+                      </span>
                     </span>
-                  </span>
-                ))}
+                  );
+                })}
               </p>
             ))}
           {pw.status === 'ready' && (
             <p
-              className={reserveState === 'empty' ? 'visually-hidden' : 'hero-status'}
+              // "Network fees are covered." is the normal state, so it isn't shown (Gold, 13 Nov); kept for screen readers
+              // and the tests. Only a reserve that's still being set up shows.
+              className={reserveState === 'pending' ? 'hero-status' : 'visually-hidden'}
               data-testid={`fee-reserve-${reserveState}`}
             >
               {reserveState === 'ready'
