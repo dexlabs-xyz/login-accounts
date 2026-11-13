@@ -42,8 +42,8 @@ works as the passkey). Each step says what you should see.
    confirming: *"Withdrew …"*.
 7. **Verification → Verify you're human** (Sumsub sandbox, test mode).
    → Status becomes *Verified human*. Then sign in to the demo app with
-   **Continue with Login**: <!-- TODO(Gold): demo app URL -->
-   the consent screen says exactly what the app will see (an ID only that app
+   **Continue with Login** at https://onchainchess.app (a chess app that
+   uses Login): the consent screen says exactly what the app will see (an ID only that app
    gets, and whether you're a verified human), never your email.
 
 Each account can make one send or withdrawal per deposit (see *Known limit*
@@ -206,8 +206,11 @@ Also worth knowing:
   deposits are split into several swaps; larger SOL amounts are refused.
 - **Testnet only:** Ethereum Sepolia, Base Sepolia, Arbitrum Sepolia and
   Solana devnet. Sumsub runs in sandbox mode.
-- **Team:** <!-- TODO(Gold): names and roles -->
-- **Other projects:** <!-- TODO(Gold): other hackathon projects by this team, or "None." -->
+- **Team:** Gold (lead, product and design) · Luke Dami (Login infrastructure,
+  the demo app and the demo video) · DIOB (KYC infrastructure, email and product
+  copy).
+- **Other projects:** none. Login accounts was built from scratch for this
+  hackathon, and we're continuing it afterwards.
 - **License:** [Apache 2.0](LICENSE).
 
 ## Built with
@@ -231,14 +234,13 @@ testnet).
 
 ## AI-written code
 
-Most of the code, tests and docs in this repository were written by AI coding
-agents (Claude Code, by Anthropic), directed and reviewed by the team. The
-team made the product and privacy decisions (recorded in
-[docs/design/passkeys.md](docs/design/passkeys.md)), designed the interface in
-Figma, and reviewed and merged every change. Security-sensitive parts (key
-handling, the privacy rule) are covered by browser tests that check no secret
-leaves the device.
-<!-- TODO(Gold): confirm this wording, and add any parts written by hand. -->
+All code, tests and docs were written by AI coding agents (Claude Code by
+Anthropic, and Codex by OpenAI), directed and reviewed by the team. The team
+made the product and privacy decisions, and turned them into explicit
+constraints (recorded in [docs/design/passkeys.md](docs/design/passkeys.md)
+and enforced by tests) that narrowed what the agents could build, so every
+solution had to meet the outcome we wanted. We designed the interface in
+Figma, and reviewed and merged every change.
 
 ## Run it locally
 
