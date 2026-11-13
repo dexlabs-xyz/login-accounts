@@ -241,6 +241,9 @@ h3 { margin: 0.5rem 0 0; }
 .app-divider { width: 0; margin-left: -1px; border-left: 1px solid rgba(255, 255, 255, 0.13); position: sticky; top: 0; height: 100dvh; }
 .brand-mark { font-family: 'Geist Pixel', 'Geist Mono', monospace; font-size: 24px; line-height: 26px; color: var(--fg); }
 .brand-mark span { color: var(--accent); }
+.brand-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Quiet, like the Sandbox tag but grey: 10px Medium on white at 8%, text at 60%. */
+.tag-testnet { flex: none; font-size: 10px; font-weight: 500; line-height: 14px; padding: 1px 6px; border-radius: 3px; color: rgba(255, 255, 255, 0.6); background: rgba(255, 255, 255, 0.08); cursor: default; }
 .side-nav { display: grid; gap: 30px; }
 .side-nav a, .tab-nav a { display: flex; align-items: center; gap: 10px; color: var(--fg); text-decoration: none; font-size: 20px; font-weight: 400; line-height: 20px; opacity: 0.6; transition: opacity 0.15s ease; border-radius: 8px; }
 .side-nav a:hover, .tab-nav a:hover { opacity: 0.85; }
@@ -436,7 +439,8 @@ h3 { margin: 0.5rem 0 0; }
   .app-main.is-home { height: auto; min-height: 0; padding-bottom: 24px; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0 6px; position: sticky; top: 0; z-index: 5; background: var(--bg); }
   .topbar .brand-mark { font-size: 20px; }
-  .topbar .side-account { margin: 0; max-width: 60%; }
+  .topbar .brand-row { flex: none; }
+  .topbar .side-account { margin: 0; flex: 0 1 auto; min-width: 0; } /* gives way to the logo and its Testnet tag */
   .topbar .side-avatar { width: 30px; height: 30px; }
   .topbar .side-email { font-size: 13px; }
   .topbar .side-balance { font-size: 13px; }

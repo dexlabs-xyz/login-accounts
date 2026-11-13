@@ -91,10 +91,16 @@ export function useCopyAddress() {
   return { address, copy };
 }
 
+/** The logo, with a quiet "Testnet" tag beside it on every signed-in page: the honesty label (Gold, 13 Nov). */
 function Brand() {
   return (
-    <div className="brand-mark" aria-label="Login (accounts)">
-      Login<span>(accts)</span>
+    <div className="brand-row">
+      <div className="brand-mark" aria-label="Login (accounts)">
+        Login<span>(accts)</span>
+      </div>
+      <span className="tag-testnet" title="Test network only. Never use real funds.">
+        Testnet
+      </span>
     </div>
   );
 }
