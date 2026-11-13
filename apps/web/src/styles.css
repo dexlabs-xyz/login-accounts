@@ -490,6 +490,9 @@ h3 { margin: 0.5rem 0 0; }
 /* The first button pushes the pair to the right; 6px between them, as in Settings. */
 [data-sonner-toaster] [data-sonner-toast].login-toast [data-button] { margin-left: 6px; }
 [data-sonner-toaster] [data-sonner-toast].login-toast [data-content] + [data-button] { margin-left: auto; }
+/* Error toasts with a link (Details on GitHub): the button sits on the left, under the text (Gold, 13 Nov). 23px is
+   where Sonner starts the text after its icon: -3px margin + 16px icon + 4px margin + 6px gap. */
+[data-sonner-toaster] [data-sonner-toast].login-toast[data-type='error'] [data-content] + [data-button] { margin-left: 23px; margin-right: auto; }
 
 /* ---------- Phones: top bar + bottom tabs instead of the sidebar ---------- */
 @media (max-width: 820px) {
