@@ -105,6 +105,26 @@ export async function goTo(page: Page, name: 'Home' | 'Notifications' | 'Verific
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name, exact: true }).click();
 }
 
+/**
+ * The "Your wallet is locked" pop-up opens by itself when the wallet is locked (Gold, 13 Nov). If it was closed,
+ * the "Unlock your wallet to continue" toast's Unlock button opens it again. Then press Unlock in the pop-up.
+ */
+export async function unlockWallet(page: Page) {
+  const dialog = page.getByRole('dialog', { name: 'Your wallet is locked' });
+  const reopen = toastWith(page, 'Unlock your wallet to continue').getByRole('button', { name: 'Unlock', exact: true });
+  await expect(dialog.or(reopen).first()).toBeVisible();
+  if (!(await dialog.isVisible())) await reopen.click();
+  await dialog.getByRole('button', { name: 'Unlock', exact: true }).click();
+}
+
+/** Close the unlock pop-up to use a page while the wallet stays locked (Esc, like the other pop-ups). */
+export async function dismissUnlock(page: Page) {
+  const dialog = page.getByRole('dialog', { name: 'Your wallet is locked' });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+}
+
 /** Home's Send / Receive pop-ups. */
 export async function openSheet(page: Page, name: 'Send' | 'Receive') {
   await goTo(page, 'Home');

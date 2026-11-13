@@ -7,6 +7,7 @@
  * Withdrawals swapped through NEAR Intents are matched to their record (by
  * Tidepool's one-time address) to show the token and the user's own address.
  */
+import { Skeleton } from 'skullet/react';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { api } from './api.ts';
 import { privateWallet } from './railgun/client.ts';
@@ -175,6 +176,14 @@ const longDate = (s: number | null) => (s ? new Date(s * 1000).toLocaleDateStrin
  * Keeps History's test ids (ul "history", li data-kind / data-status), each entry's
  * Etherscan link. (The claim note and the "Only you see this…" note were removed on Gold's call, 12 Nov.)
  */
+/** Stand-ins measured for the loading skeleton; never shown as text. */
+const SAMPLE_ROWS = [
+  { what: 'Deposit on Ethereum Sepolia', when: 'November 13, 2026 · Etherscan', amount: '+$250.00' },
+  { what: 'Sent privately to 0zk1qy…4c24', when: 'November 12, 2026 · Etherscan', amount: '−$40.00' },
+  { what: 'Withdrew to 0x3943…B490', when: 'November 11, 2026 · Etherscan', amount: '−$15.00' },
+  { what: 'Test USDT', when: 'November 10, 2026 · Etherscan', amount: '+$250.00' },
+];
+
 export function Activity({
   title,
   limit,
@@ -228,7 +237,30 @@ export function Activity({
         )}
       </div>
       {failed && <p className="panel-empty">Couldn’t load your history. Lock and unlock to try again.</p>}
-      {!failed && !entries && (card ? <div className="activity-empty"><span>Loading…</span></div> : <p className="panel-empty">Loading…</p>)}
+      {/* Loading: rows shaped like real ones, drawn as a skeleton (skullet, Gold 13 Nov). Not the tests' list.
+          Only while the card has nothing to show: the history waits for the wallet's sync to finish, and unfinished
+          deposits are known before that, so once they're listed the card is done loading (Gold, 13 Nov). */}
+      {!failed && !entries && pend.length === 0 && (
+        <Skeleton loading label="Loading your notifications">
+          <ul className="activity-list">
+            {SAMPLE_ROWS.slice(0, Math.max(1, Math.min(room, 4))).map((r, i) => (
+              <li key={i}>
+                <span className="activity-icon">
+                  <img src="/img/arrow-down-to-line.svg" alt="" width={18} height={18} />
+                </span>
+                <div className="activity-main">
+                  <span className="activity-what">{r.what}</span>
+                  <span className="activity-when">{r.when}</span>
+                </div>
+                <div className="activity-side">
+                  <span className="activity-amount">{r.amount}</span>
+                  <span className="activity-status">Successful</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Skeleton>
+      )}
       {nothing &&
         (card ? (
           <div className="activity-empty">

@@ -26,7 +26,8 @@ changes **how things look and move**, not what they do or say about safety.
 - `apps/server/` beyond styling the consent page, `AGENTS.md`, `.internal/`.
 - New dependencies: ask Gold first. Approved 12 Nov and pinned: `motion` 14.7.1 (motion.dev, MIT, the free
   version only: no paid Motion+ code in this public repo), `sonner` 2.0.8 (toasts, MIT) and `uqr` 0.1.3 (QR
-  codes, MIT, no dependencies). Never add crypto or auth packages.
+  codes, MIT, no dependencies). Approved 13 Nov: `skullet` 0.0.3 (loading skeletons, MIT, no dependencies;
+  used without `id`, so it stores nothing). Never add crypto or auth packages.
 - The Sumsub SDK must keep loading only after the user presses Continue (Kyc.tsx).
 
 ## Keep (tests and trust depend on them)
@@ -57,6 +58,11 @@ test in the same change and say so:
   Content that belongs to a screen stays on it: Syncing % next to the balance, Send/Receive steps and their review
   warnings, the verification stages, the broken sign-in link page.
   Unfinished deposits sit at the top of Notifications (`li[data-kind="pending"]`, Resume / Finish).
+  Locked wallet (Gold, 13 Nov): every page keeps its layout; a pop-up `role="dialog"` named **Your wallet is locked**
+  opens by itself, with one **Unlock** button (spinner while waiting, then a ring and a check that draw themselves).
+  It can be closed (Esc); Home's buttons and Settings › Status › **Unlock** open it again. e2e: `unlockWallet`,
+  `dismissUnlock`. "Unlock with passkey" is gone; "Set up wallet on this device" stays for a device with no wallet.
+  Theme follows the device until Settings › Theme (radios **Light** / **Dark**) is used.
   Test USDT is a button on Home. e2e helpers: `goTo`, `openSheet`, `closeSheet`, `chooseSend`, `errorToast`,
   `spendableUsdt`.
 - **Headings:** "Welcome" (was "Sign up or sign in"), "Home" (screen-reader only; was "Your account"),

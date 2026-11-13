@@ -3,7 +3,7 @@
  * (docs/design/passkeys.md).
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, freshEmail, goTo, latestCode, recordSecrets, recordWebAuthnCalls, signOut, signUp, toastWith, errorToast, verifyEmail, walletCheck } from './helpers.ts';
+import { Device, disableAutofill, freshEmail, goTo, latestCode, recordSecrets, recordWebAuthnCalls, signOut, signUp, toastWith, errorToast, unlockWallet, dismissUnlock, verifyEmail, walletCheck } from './helpers.ts';
 
 /** Rows of the passkey list in Settings (Sonner toasts are list items too, so don't count the whole page). */
 const passkeyRows = (page: import('@playwright/test').Page) => page.getByRole('list', { name: 'Passkeys' }).getByRole('listitem');
@@ -23,7 +23,7 @@ test.describe('sign-up', () => {
     await Device.add(page, { prf: true, synced: true });
     await signUp(page);
     await goTo(page, 'Settings'); // wallet and passkeys live in Settings
-    await expect(page.getByText('Unlocked')).toBeVisible();
+    await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
     await expect(page.getByText('Synced passkey')).toBeVisible();
     await expect(page.getByText('You could lose access')).toHaveCount(0);
   });
@@ -78,7 +78,7 @@ test.describe('sign-in and unlock', () => {
     const before = await walletCheck(page);
     await signOut(page);
     await page.getByRole('button', { name: 'Sign in with passkey' }).click();
-    await expect(page.getByText('Unlocked')).toBeVisible();
+    await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
     expect(await walletCheck(page)).toBe(before);
   });
 
@@ -88,8 +88,9 @@ test.describe('sign-in and unlock', () => {
     await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     const before = await walletCheck(page);
     await page.reload();
-    await expect(page.getByText('Locked')).toBeVisible();
-    await page.getByRole('button', { name: 'Unlock with passkey' }).click();
+    await expect(page.getByText('Locked', { exact: true })).toBeVisible();
+    await unlockWallet(page);
+    await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
     expect(await walletCheck(page)).toBe(before);
   });
 
@@ -114,7 +115,7 @@ test('returning user signs in from the email field autofill (D2)', async ({ page
   await page.evaluate(() => sessionStorage.setItem('e2e-autofill', 'on'));
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible(); // the page you were on, kept through sign-out
-  await expect(page.getByText('Unlocked')).toBeVisible();
+  await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
   expect(await walletCheck(page)).toBe(before);
 });
 
@@ -137,7 +138,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
     // Laptop is gone. The phone alone opens the same wallet.
     await signOut(page);
     await page.getByRole('button', { name: 'Sign in with passkey' }).click();
-    await expect(page.getByText('Unlocked')).toBeVisible();
+    await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
     expect(await walletCheck(page)).toBe(before);
   });
 
@@ -205,7 +206,7 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await goTo(page, 'Settings'); // wallet and passkeys live in Settings
     const before = await walletCheck(page);
     await page.reload(); // locks the wallet (Settings has no Lock button in Gold's Figma)
-    await expect(page.getByRole('button', { name: 'Unlock with passkey' })).toBeVisible();
+    await dismissUnlock(page); // the unlock pop-up opens by itself; close it to add a passkey while locked
 
     const phone = await Device.add(page, { synced: true, transport: 'usb' });
     await laptop.setResponds(false); // the user registers on the phone
@@ -217,8 +218,8 @@ test.describe('multiple passkeys (D1, D4)', () => {
 
     // Unlock with the laptop (the passkey that opens the wallet)...
     await phone.setResponds(false);
-    await page.getByRole('button', { name: 'Unlock with passkey' }).click();
-    await expect(page.getByText('Unlocked')).toBeVisible();
+    await unlockWallet(page);
+    await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
     // ...then connect the phone, using the phone.
     await laptop.setResponds(false);
     await phone.setResponds(true);
@@ -228,8 +229,8 @@ test.describe('multiple passkeys (D1, D4)', () => {
     // Laptop gone: the phone alone opens the same wallet.
     await laptop.remove();
     await page.reload();
-    await page.getByRole('button', { name: 'Unlock with passkey' }).click();
-    await expect(page.getByText('Unlocked')).toBeVisible();
+    await unlockWallet(page);
+    await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
     expect(await walletCheck(page)).toBe(before);
     expect(await phone.credentials()).toHaveLength(1);
   });
@@ -354,10 +355,10 @@ test('no secret ever leaves the device or lands in storage (D6)', async ({ page 
   await signUp(page);
   await signOut(page);
   await page.getByRole('button', { name: 'Sign in with passkey' }).click();
-  await expect(page.getByText('Unlocked')).toBeVisible();
+  await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
   // A second passkey use in the same tab (was "Confirm a test send", not in Gold's Figma): lock by reloading, then unlock.
   await page.reload();
-  await page.getByRole('button', { name: 'Unlock with passkey' }).click();
-  await expect(page.getByText('Unlocked')).toBeVisible();
+  await unlockWallet(page);
+  await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
   await leaks.assertNoLeaks();
 });

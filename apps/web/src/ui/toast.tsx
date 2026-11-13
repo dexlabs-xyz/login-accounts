@@ -5,6 +5,7 @@
  */
 import { createContext, useContext, useEffect, useRef } from 'react';
 import { Toaster, toast } from 'sonner';
+import { useTheme } from './theme.ts';
 
 /**
  * message: a status with no icon (e.g. "Sent $250 to your private balance").
@@ -27,15 +28,24 @@ export interface ToastInput {
   action?: { label: string; onClick: () => void };
   /** A second, quieter button (e.g. Keep for signing in). */
   cancel?: { label: string; onClick: () => void };
+  /** No × to close it: for a reminder that stays until what it asks for is done (e.g. unlocking the wallet). */
+  persistent?: boolean;
 }
 
 const FADE_AFTER_MS = 5000;
 
 const api = {
-  show({ text, description, kind = 'message', id, sticky, testId, action, cancel }: ToastInput) {
+  show({ text, description, kind = 'message', id, sticky, testId, action, cancel, persistent }: ToastInput) {
     const content = testId ? <span data-testid={testId}>{text}</span> : text;
     const stays = sticky ?? (kind === 'error' || kind === 'loading' || !!action);
-    const options = { id, description, action, cancel, duration: stays ? Infinity : FADE_AFTER_MS };
+    const options = {
+      id,
+      description,
+      action,
+      cancel,
+      duration: stays || persistent ? Infinity : FADE_AFTER_MS,
+      ...(persistent && { closeButton: false, dismissible: false }),
+    };
     const show = { message: toast.message, loading: toast.loading, info: toast.info, success: toast.success, warning: toast.warning, error: toast.error }[kind];
     show(content, options);
   },
@@ -68,11 +78,12 @@ export function useToastWhile(text: string | null | undefined, options: Omit<Toa
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
+  const theme = useTheme();
   return (
     <Ctx.Provider value={api}>
       {children}
       <Toaster
-        theme="dark"
+        theme={theme}
         position="bottom-right"
         closeButton
         offset={20}

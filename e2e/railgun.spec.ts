@@ -4,7 +4,7 @@
  * TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, recordSecrets, signUp, toastWith } from './helpers.ts';
+import { Device, disableAutofill, recordSecrets, signUp, toastWith, unlockWallet } from './helpers.ts';
 
 test.describe.configure({ timeout: 5 * 60_000 });
 
@@ -64,8 +64,8 @@ test('same passkey, same Railgun address after locking and unlocking', async ({ 
   const first = await address.getAttribute('title');
 
   await page.reload(); // locks the wallet (Settings has no Lock button in Gold's Figma)
-  await expect(card).toHaveCount(0); // worker terminated, nothing shown while locked
-  await page.getByRole('button', { name: 'Unlock with passkey' }).click();
+  await expect(address).toHaveCount(0); // worker terminated: no address (the page keeps its layout behind the unlock pop-up)
+  await unlockWallet(page);
   await expect(address).toHaveText(/^0zk/, { timeout: 120_000 });
   expect(await address.getAttribute('title')).toBe(first);
 });

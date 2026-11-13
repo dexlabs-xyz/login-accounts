@@ -16,6 +16,7 @@ export function Modal({
   children,
   wide = false,
   bare = false,
+  focusPanel = false,
 }: {
   open: boolean;
   title: string;
@@ -25,6 +26,8 @@ export function Modal({
   wide?: boolean;
   /** The content draws its own header (Figma pop-ups: title with < > step chevrons). */
   bare?: boolean;
+  /** Focus the pop-up itself, not its first button (the unlock pop-up opens by itself; no focus ring on Unlock). */
+  focusPanel?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -36,7 +39,7 @@ export function Modal({
     const before = document.activeElement as HTMLElement | null;
     page?.setAttribute('inert', '');
     const first = panel.current?.querySelector<HTMLElement>('button:not([disabled]), input, select, [href], [tabindex]:not([tabindex="-1"])');
-    (first ?? panel.current)?.focus();
+    ((focusPanel ? null : first) ?? panel.current)?.focus();
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
     addEventListener('keydown', onKey);
     return () => {

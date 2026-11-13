@@ -10,6 +10,9 @@ import { BalanceChart } from './home/BalanceChart.tsx';
 import { CopyAddressButton } from './home/CopyButton.tsx';
 import { Modal } from './ui/Modal.tsx';
 import { ToastProvider, useToastWhile } from './ui/toast.tsx';
+import { setTheme, useTheme } from './ui/theme.ts';
+import { Skeleton } from 'skullet/react';
+import { UNLOCK_DONE_MS, UnlockSheet, type UnlockStage } from './home/UnlockSheet.tsx';
 import { usd } from './money.ts';
 import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS } from './railgun/protocol.ts';
@@ -211,11 +214,21 @@ function WalletStatusToasts() {
  * The big number is everything private; the small line under it says what's spendable now and
  * what's still in Railgun's privacy check (the browser tests read it: balance-<Bucket>-<token>).
  */
-function PrivateBalance({ hidden, onSend, onReceive }: { hidden: boolean; onSend: () => void; onReceive: () => void }) {
+function PrivateBalance({
+  hidden,
+  onSend,
+  onReceive,
+  onLocked,
+}: {
+  hidden: boolean;
+  onSend: () => void;
+  onReceive: () => void;
+  /** Set while the wallet is locked: the page keeps its layout, and any of its buttons opens the unlock pop-up. */
+  onLocked?: () => void;
+}) {
   const pw = usePrivateWallet();
   const total = useUsdTotal();
   const { address } = useCopyAddress();
-  if (pw.status === 'off') return null;
   const isReserve = (a: string) => a.toLowerCase() === SEPOLIA_WETH.toLowerCase();
   const all = Object.entries(pw.balances)
     .filter(([bucket]) => bucket !== 'Spent')
@@ -232,13 +245,19 @@ function PrivateBalance({ hidden, onSend, onReceive }: { hidden: boolean; onSend
   const ready = pw.status === 'ready' || pw.status === 'syncing';
 
   return (
-    <section className="hero" aria-labelledby="private-h">
-      <h2 id="private-h" className="hero-label">
-        Private balance
-      </h2>
+    // Named by aria-label, not the heading: while loading, the heading sits in the skeleton (hidden from screen readers).
+    <section className="hero" aria-label="Private balance">
+      {/* Label and amount wait in a skeleton until there's a balance to show (skullet, Gold 13 Nov). */}
+      <Skeleton loading={total === null} className="hero-head">
+        <h2 id="private-h" className="hero-label">
+          Private balance
+        </h2>
+      </Skeleton>
       {/* Amount, with what's happening beside it (Figma: "10% Syncing…", bottom-aligned, 9px apart). */}
       <div className="hero-row">
-        <p className="hero-amount">{total === null ? '—' : hidden ? '••••••' : usd(total, 6)}</p>
+        <Skeleton loading={total === null}>
+          <p className="hero-amount">{total === null ? '$0.00' : hidden ? '••••••' : usd(total, 6)}</p>
+        </Skeleton>
         <div className="hero-meta">
           {pw.status === 'syncing' && (
             <p className="hero-status hero-syncing" role="status">
@@ -277,7 +296,15 @@ function PrivateBalance({ hidden, onSend, onReceive }: { hidden: boolean; onSend
           )}
         </div>
       </div>
-      <div className="hero-actions">
+      <div
+        className="hero-actions"
+        onClickCapture={(e) => {
+          if (!onLocked) return;
+          e.preventDefault();
+          e.stopPropagation();
+          onLocked();
+        }}
+      >
         <TestUsdtButton />
         <button type="button" className="hero-btn" onClick={onSend}>
           <img src="/img/send.svg" alt="" width={18} height={18} />
@@ -948,6 +975,50 @@ function Account({
   const [page, go] = usePage();
   const [hidden, toggleHidden] = useHideBalance();
   const [sheet, setSheet] = useState<'send' | 'receive' | null>(null);
+
+  // The unlock pop-up (Gold, 13 Nov): it opens by itself whenever the wallet is locked (sign-in, a reload, 15 minutes
+  // idle), over whatever page you're on. It can be closed; anything that needs the wallet opens it again.
+  const locked = me.hasVault && !open;
+  const [unlockShown, setUnlockShown] = useState(locked);
+  const [unlockStage, setUnlockStage] = useState<UnlockStage>('locked');
+  const showUnlock = useCallback(() => {
+    setSheet(null);
+    setUnlockShown(true);
+  }, []);
+  useEffect(() => {
+    if (!locked) return;
+    setUnlockStage('locked');
+    showUnlock();
+  }, [locked, showUnlock]);
+  // Closed while still locked: a toast stays up with a way back in (Gold, 13 Nov). It goes when the pop-up opens again
+  // or the wallet unlocks.
+  useToastWhile(locked && !unlockShown ? 'Unlock your wallet to continue' : null, {
+    id: 'unlock-reminder',
+    kind: 'message',
+    persistent: true,
+    action: { label: 'Unlock', onClick: showUnlock },
+  });
+  const unlockNow = async () => {
+    setError('');
+    setNote(null);
+    setUnlockStage('busy');
+    try {
+      const o = await unlock(me);
+      if (o.kind === 'opened') {
+        // Tumble, ring and check (about 1.6s), then the pop-up goes.
+        setUnlockStage('done');
+        setTimeout(() => setUnlockShown(false), UNLOCK_DONE_MS);
+      } else {
+        setNote(outcomeNote(o));
+        setUnlockStage('locked');
+      }
+    } catch (e) {
+      setError(explain(e));
+      setUnlockStage('locked');
+    } finally {
+      await refresh();
+    }
+  };
   // Unfinished deposits stay in Notifications; "Resume" reopens the Receive pop-up at that deposit's address.
   const [resume, setResume] = useState<{ index: number; n: number } | null>(null);
   const pending = usePendingDeposits((index) => {
@@ -992,6 +1063,9 @@ function Account({
       <Modal open={sheet === 'receive'} title="Receive" onClose={() => setSheet(null)} bare>
         <AddMoney resume={resume} />
       </Modal>
+      <Modal open={unlockShown} title="Your wallet is locked" onClose={() => setUnlockShown(false)} bare focusPanel>
+        <UnlockSheet stage={unlockStage} onUnlock={() => void unlockNow()} />
+      </Modal>
     {/* Outside the pages, so it keeps watching while you switch between them. */}
       {me.hasVault && open && <ClaimWatcher />}
       {me.hasVault && open && <WalletStatusToasts />}
@@ -999,33 +1073,30 @@ function Account({
         {page === 'home' && (
           <>
             <h1 className="visually-hidden">Home</h1>
-            {me.hasVault && open ? (
+            {/* Locked or not, Home keeps its layout (Gold, 13 Nov): the balance and Notifications wait in their
+                skeletons behind the unlock pop-up. Only a device with no wallet yet gets a different panel. */}
+            {me.hasVault ? (
               <>
-                <PrivateBalance hidden={hidden} onSend={() => setSheet('send')} onReceive={() => setSheet('receive')} />
+                <PrivateBalance
+                  hidden={hidden}
+                  onSend={() => setSheet('send')}
+                  onReceive={() => setSheet('receive')}
+                  onLocked={open ? undefined : showUnlock}
+                />
                 <BalanceChart />
                 <Activity title="Notifications" card limit={4} hidden={hidden} onViewAll={() => go('notifications')} pending={pending} />
               </>
             ) : (
               <section className="panel locked" aria-labelledby="locked-h">
-                <h2 id="locked-h">{me.hasVault ? 'Your wallet is locked' : 'No wallet on this device yet'}</h2>
-                <p className="muted">
-                  {me.hasVault
-                    ? 'Unlock it with your passkey to see your private balance and activity. It locks after 15 minutes idle or when you close the tab.'
-                    : 'Set it up with your passkey to hold and send money privately.'}
-                </p>
-                {me.hasVault ? (
-                  <button className="cta" disabled={busy} onClick={() => run(async () => setNote(outcomeNote(await unlock(me))))}>
-                    Unlock with passkey
-                  </button>
-                ) : (
-                  <button
-                    className="cta"
-                    disabled={busy}
-                    onClick={() => run(async () => setNote(outcomeNote(await setUpWalletHere(me))))}
-                  >
-                    Set up wallet on this device
-                  </button>
-                )}
+                <h2 id="locked-h">No wallet on this device yet</h2>
+                <p className="muted">Set it up with your passkey to hold and send money privately.</p>
+                <button
+                  className="cta"
+                  disabled={busy}
+                  onClick={() => run(async () => setNote(outcomeNote(await setUpWalletHere(me))))}
+                >
+                  Set up wallet on this device
+                </button>
               </section>
             )}
             </>
@@ -1034,12 +1105,10 @@ function Account({
         {page === 'notifications' && (
           <>
             <h1 className="page-title is-section">Notifications</h1>
-            {me.hasVault && open ? (
+            {me.hasVault ? (
               <Activity title="Notifications" hideTitle limit={20} hidden={hidden} pending={pending} />
             ) : (
-              <p className="muted">
-                Unlock your wallet on Home to see your activity. It’s worked out on this device and hidden while locked.
-              </p>
+              <p className="muted">Set up your wallet on Home to see your activity.</p>
             )}
           </>
         )}
@@ -1121,6 +1190,10 @@ function Account({
                   </span>
                 </div>
                 <div className="set-row">
+                  <span id="theme-label">Theme</span>
+                  <ThemeSwitch />
+                </div>
+                <div className="set-row">
                   <span className="is-danger-text">Account</span>
                   <button
                     className="set-btn is-danger"
@@ -1140,7 +1213,7 @@ function Account({
                 busy={busy}
                 fp={fp}
                 onSetUp={() => run(async () => setNote(outcomeNote(await setUpWalletHere(me))))}
-                onUnlock={() => run(async () => setNote(outcomeNote(await unlock(me))))}
+                onUnlock={showUnlock}
               />
               <ConnectedApps refreshKey={kyc ? String(kyc.verifiedHuman) : ''} />
               <div className="set-group">
@@ -1208,7 +1281,7 @@ function WalletRows({
             <span className="set-actions">
               <span>Locked</span>
               <button className="set-btn" disabled={busy} onClick={onUnlock}>
-                Unlock with passkey
+                Unlock
               </button>
             </span>
           )}
@@ -1225,6 +1298,25 @@ function WalletRows({
         </p>
       )}
     </section>
+  );
+}
+
+/** Settings › Theme: light or dark (Figma 562:9778). Until one is picked, the app follows the device's setting. */
+function ThemeSwitch() {
+  const theme = useTheme();
+  return (
+    <span className="theme-switch" role="radiogroup" aria-labelledby="theme-label">
+      {(
+        [
+          ['light', 'Light', '/img/sun.svg'],
+          ['dark', 'Dark', '/img/moon.svg'],
+        ] as const
+      ).map(([value, label, icon]) => (
+        <button key={value} type="button" role="radio" aria-checked={theme === value} aria-label={label} title={label} onClick={() => setTheme(value)}>
+          <img src={icon} alt="" width={15} height={15} />
+        </button>
+      ))}
+    </span>
   );
 }
 

@@ -8,6 +8,7 @@ import { privateWallet } from '../railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, USDC_DECIMALS, USDT_DECIMALS } from '../railgun/protocol.ts';
 import { usd } from '../money.ts';
 import { useToast } from '../ui/toast.tsx';
+import { Skeleton } from 'skullet/react';
 
 export type Page = 'home' | 'notifications' | 'verification' | 'settings';
 const PAGES: { id: Page; label: string; icon: string }[] = [
@@ -108,6 +109,8 @@ function Brand() {
 function Account({ email, hidden, onToggleHidden }: { email: string; hidden: boolean; onToggleHidden: () => void }) {
   const total = useUsdTotal();
   const { address, copy } = useCopyAddress();
+  // While the wallet opens there's no balance yet: a skeleton in its place (skullet, Gold 13 Nov). Locked: a dash.
+  const opening = useSyncExternalStore(privateWallet.subscribe, privateWallet.get).status === 'starting';
   return (
     <div className="side-account">
       <img className="side-avatar" src="/img/avatar.png" alt="" width={39} height={39} />
@@ -116,7 +119,9 @@ function Account({ email, hidden, onToggleHidden }: { email: string; hidden: boo
           {email}
         </span>
         <span className="side-balance">
-          <span>{total === null ? '—' : hidden ? '••••' : usd(total, 6)}</span>
+          <Skeleton loading={opening} className="side-amount">
+            <span>{total === null ? (opening ? '$0.00' : '—') : hidden ? '••••' : usd(total, 6)}</span>
+          </Skeleton>
           <button type="button" className="icon-btn" aria-label={hidden ? 'Show balance' : 'Hide balance'} aria-pressed={hidden} onClick={onToggleHidden}>
             <img src={hidden ? '/img/eye-off.svg' : '/img/eye.svg'} alt="" width={16} height={16} />
           </button>
