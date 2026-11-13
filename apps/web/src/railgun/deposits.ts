@@ -379,10 +379,17 @@ export function createDeposits(ctx: DepositContext) {
       const recipients = held.map((t) => ({ tokenAddress: t.address, amount: t.amount, recipientAddress: ctx.railgunAddress }));
       const estimate = () =>
         gasEstimateForShield(TXIDVersion.V2_PoseidonMerkle, NETWORK, shieldPrivateKey, recipients, [], wallet.address);
-      // One retry: a lagging RPC node can still fail the first estimate.
+      // Retries: a lagging RPC node can still fail the estimate ("allowance" revert seen live 13 Nov 2026,
+      // after the approval was visible on another node). Nothing is sent by an estimate.
       const { gasEstimate } = await estimate().catch(async () => {
-        await new Promise((r) => setTimeout(r, 5_000));
-        return estimate();
+        for (let i = 0; ; i++) {
+          await new Promise((r) => setTimeout(r, 5_000));
+          try {
+            return await estimate();
+          } catch (e) {
+            if (i >= 3) throw e;
+          }
+        }
       });
       const fees = await provider.getFeeData();
       const { transaction } = await populateShield(TXIDVersion.V2_PoseidonMerkle, NETWORK, shieldPrivateKey, recipients, [], {

@@ -38,8 +38,16 @@ test('A sends USDT privately to B through a broadcaster', async ({ page, browser
     await page.waitForTimeout(60_000);
   }
   say(`review: ${(await send.innerText()).replace(/\n+/g, ' | ').slice(0, 300)}`);
-  await send.getByRole('button', { name: 'Confirm with passkey' }).click();
-  await watch(page, 'transfer-status', /^Sent /, 10 * 60_000, say);
+  // Confirm; if a relay refuses (the app says so and nothing is sent), a person presses Review again.
+  for (let attempt = 1; ; attempt++) {
+    await send.getByRole('button', { name: 'Confirm with passkey' }).click({ timeout: 180_000 });
+    const sent = await watch(page, 'transfer-status', /^Sent /, 10 * 60_000, say).then(() => true, () => false);
+    if (sent) break;
+    const errors = await errorTexts(page);
+    say(`confirm attempt ${attempt}: ${errors}`);
+    if (!/network relay couldn’t confirm/.test(errors) || attempt >= 4) throw new Error(`Send failed: ${errors}`);
+    await send.getByRole('button', { name: 'Review' }).click();
+  }
   say(`tx: ${await send.getByRole('link', { name: /View on Sepolia Etherscan/ }).getAttribute('href')}`);
 
   // --- B sees the USDT arrive (it may still be "being checked").

@@ -133,7 +133,7 @@ test('Solana devnet: asks for a refund address, then gets a Solana deposit addre
   await refund.fill(encodeBase58(raw));
   await add.getByRole('button', { name: 'Get deposit address' }).click();
   await expect(add.getByTestId('tidepool-deposit-address')).toHaveText(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, { timeout: 60_000 });
-  await expect(add.getByText(/Send exactly .* USDC/)).toBeVisible();
+  await expect(add.getByText(/only send USDC on Solana devnet, the exact amount above/)).toBeVisible(); // redesign: an Amount row + this note
   await expect(add.getByText('Solana devnet', { exact: true })).toBeVisible();
 });
 
