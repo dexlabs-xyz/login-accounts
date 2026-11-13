@@ -1,13 +1,8 @@
-/**
- * "Apps you've signed in to": each app that got a Login ID for this account,
- * and exactly what it can see. Every app sees the same two things at most:
- * an ID that only that app gets, and "verified human" if the user passed.
- * Never the email, name, wallet or identity documents (decision, 9 Nov 2026).
- */
+/** Lists per-app disclosures, including explicitly approved level sharing. */
 import { useEffect, useState } from 'react';
 import { api } from './api.ts';
 
-type Apps = { apps: { name: string }[]; verifiedHuman: boolean; sandbox: boolean };
+type Apps = { apps: { name: string; sharesVerificationLevel?: boolean }[]; verifiedHuman: boolean; sandbox: boolean };
 
 /** `refreshKey` changes when the verification result changes, so the list stays in step. */
 export function ConnectedApps({ refreshKey }: { refreshKey: string }) {
@@ -34,7 +29,7 @@ export function ConnectedApps({ refreshKey }: { refreshKey: string }) {
             <li key={i} className="set-row">
               <span>{a.name}</span>
               <span className="set-value muted">
-                Sees an ID only it gets{data.verifiedHuman ? <>, and that you’re a verified human{data.sandbox ? ' (test mode)' : ''}</> : null}
+                Sees an ID only it gets{data.verifiedHuman ? <>, and that you’re a verified human{data.sandbox ? ' (test mode)' : ''}</> : null}{a.sharesVerificationLevel ? <>, plus your verification level when available</> : null}
               </span>
             </li>
           ))}

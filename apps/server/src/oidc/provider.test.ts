@@ -63,11 +63,13 @@ async function fixture() {
     })),
     getSignedInUser: async () => user,
     getKycClaims: async (_id, scopes) => {
-      expect(scopes).toEqual(['openid']);
+      expect(scopes).toContain('openid');
+      expect(scopes.every((scope) => ['openid', 'kyc_level'].includes(scope))).toBe(true);
       return verification;
     },
   };
   oidc = createOidc(options);
+  const consentPages: string[] = [];
   const cookies = new Map<string, string>();
   async function request(path: string, init: RequestInit = {}, jar = cookies) {
     const response = await fetch(new URL(path, origin), {
@@ -118,6 +120,7 @@ async function fixture() {
       } else if (location) path = location;
       else {
         const html = await response.text();
+        consentPages.push(html);
         const action = /action="([^"]+\/confirm)"/.exec(html)?.[1];
         if (!action) throw new Error(`Unexpected flow response (${response.status})`);
         const approved = await request(action, {
@@ -145,6 +148,7 @@ async function fixture() {
   return {
     db,
     oidc,
+    consentPages,
     origin,
     request,
     authorize,
@@ -226,7 +230,12 @@ describe('OIDC local integration', () => {
       method: 'passkey',
       userVerified: true,
     });
-    let response = await f.request(f.authorize());
+    f.setVerification({
+      verified_human: true,
+      kyc_level: 'L2',
+      verification_sandbox: true,
+    });
+    let response = await f.request(f.authorize('app-a', { scope: 'openid kyc_level' }));
     for (let i = 0; i < 8; i++) {
       const location = response.headers.get('location');
       if (location) {
@@ -405,4 +414,69 @@ it('retains signed sessions, issued tokens, pending codes and pairwise IDs when 
   expect(await (await f.request('/oidc/jwks')).json()).toEqual(jwksBefore);
   const remembered = await f.request(f.authorize('app-a', { prompt: 'none' }));
   expect(new URL(remembered.headers.get('location')!).searchParams.has('code')).toBe(true);
+});
+
+for (const level of ['L1', 'L2'] as const)
+  it(`releases ${level} after the existing disclosed Continue action; other apps and openid-only requests stay private`, async () => {
+    const f = await fixture();
+    f.setVerification({
+      verified_human: true,
+      kyc_level: level,
+      verification_sandbox: true,
+    });
+    async function userInfo(app: string, scope: string) {
+      const callback = await f.finish(f.authorize(app, { scope }));
+      const response = await f.exchange(callback.searchParams.get('code')!, app);
+      expect(response.status).toBe(200);
+      const tokens = await response.json();
+      const info = await (
+        await f.request('/oidc/me', {
+          headers: { authorization: `Bearer ${tokens.access_token}` },
+        })
+      ).json();
+      return { tokens, info };
+    }
+    const { tokens, info } = await userInfo('app-a', 'openid kyc_level');
+    expect(tokens.scope.split(' ')).toContain('kyc_level');
+    expect(info.kyc_level).toBe(level);
+    expect(info.verification_sandbox).toBe(true);
+    expect(f.consentPages.at(-1)).toContain(
+      'receives your verification status and level when available',
+    );
+    expect(f.consentPages.at(-1)).toContain('<button>Allow and continue</button>');
+    expect(f.consentPages.at(-1)).not.toContain('checkbox');
+    expect((await userInfo('app-a', 'openid')).info.kyc_level).toBeUndefined();
+    const other = await userInfo('app-b', 'openid');
+    expect(other.info.sub).not.toBe(info.sub);
+    expect(other.info.kyc_level).toBeUndefined();
+  });
+it('an old openid grant cannot silently approve the new level scope', async () => {
+  const f = await fixture();
+  await f.finish(f.authorize());
+  f.setVerification({
+    verified_human: true,
+    kyc_level: 'L2',
+    verification_sandbox: true,
+  });
+  const silent = await f.request(
+    f.authorize('app-a', { scope: 'openid kyc_level', prompt: 'none' }),
+  );
+  expect(new URL(silent.headers.get('location')!).searchParams.get('error')).toBe(
+    'consent_required',
+  );
+  const before = f.consentPages.length;
+  await f.finish(f.authorize('app-a', { scope: 'openid kyc_level' }));
+  expect(f.consentPages.length).toBe(before + 1);
+});
+it('unverified sign-in still completes when level sharing is requested; no verification is invented', async () => {
+  const f = await fixture();
+  const callback = await f.finish(f.authorize('app-a', { scope: 'openid kyc_level' }));
+  const tokens = await (await f.exchange(callback.searchParams.get('code')!)).json();
+  const info = await (
+    await f.request('/oidc/me', {
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    })
+  ).json();
+  expect(info.verified_human).toBeUndefined();
+  expect(info.kyc_level).toBeUndefined();
 });

@@ -18,6 +18,7 @@ afterEach(() => vi.unstubAllEnvs());
 async function signInToDemoApp(
   opts: {
     getKycClaims?: GetKycClaims;
+    scope?: string;
     setup?: (db: DB) => void;
     hosted?: boolean;
     hostedRpId?: string;
@@ -112,7 +113,7 @@ async function signInToDemoApp(
           client_id: 'chess-local',
           redirect_uri: callback,
           response_type: 'code',
-          scope: 'openid',
+          scope: opts.scope ?? 'openid',
           code_challenge: createHash('sha256').update('a'.repeat(64)).digest('base64url'),
           code_challenge_method: 'S256',
         }),
@@ -229,7 +230,10 @@ it('serves HTTPS discovery, Secure cookies and KYC with the live demo.withlogin.
 });
 
 it('also accepts the parent withlogin.com RP without changing the configured passkey domain', async () => {
-  const info = await signInToDemoApp({ hosted: true, hostedRpId: 'withlogin.com' });
+  const info = await signInToDemoApp({
+    hosted: true,
+    hostedRpId: 'withlogin.com',
+  });
   expect(typeof info.sub).toBe('string');
 });
 
@@ -251,7 +255,12 @@ it.each([
       ...override,
     };
     expect(() =>
-      createApp({ config, db, mailer: { async send() {} }, oidcIssuer: DEMO_ISSUER }),
+      createApp({
+        config,
+        db,
+        mailer: { async send() {} },
+        oidcIssuer: DEMO_ISSUER,
+      }),
     ).toThrow('OIDC issuer and passkey origin/RP configuration must agree.');
   } finally {
     db.close();
@@ -259,7 +268,11 @@ it.each([
 });
 
 it('the consent page tells a verified user exactly what the app will see; the apps list shows the app after sign-in', async () => {
-  const capture: { consent?: string; appsBefore?: unknown; appsAfter?: unknown } = {};
+  const capture: {
+    consent?: string;
+    appsBefore?: unknown;
+    appsAfter?: unknown;
+  } = {};
   await signInToDemoApp({
     capture,
     setup: (db) =>
@@ -271,8 +284,16 @@ it('the consent page tells a verified user exactly what the app will see; the ap
   expect(capture.consent).toContain('verified human (test mode)');
   expect(capture.consent).not.toContain('test@example.com');
   expect(capture.consent).not.toContain('L2');
-  expect(capture.appsBefore).toEqual({ apps: [], verifiedHuman: true, sandbox: true });
-  expect(capture.appsAfter).toEqual({ apps: [{ name: 'Chess demo' }], verifiedHuman: true, sandbox: true });
+  expect(capture.appsBefore).toEqual({
+    apps: [],
+    verifiedHuman: true,
+    sandbox: true,
+  });
+  expect(capture.appsAfter).toEqual({
+    apps: [{ name: 'Chess demo' }],
+    verifiedHuman: true,
+    sandbox: true,
+  });
 });
 
 it('the consent page tells an unverified user the app won’t see verified human, and how to verify', async () => {
@@ -281,5 +302,31 @@ it('the consent page tells an unverified user the app won’t see verified human
   expect(Object.hasOwn(info, 'verified_human')).toBe(false);
   expect(capture.consent).toContain('You haven’t verified you’re human, so it won’t see that.');
   expect(capture.consent).toContain('Verify on your Login account');
-  expect(capture.appsAfter).toEqual({ apps: [{ name: 'Chess demo' }], verifiedHuman: false, sandbox: false });
+  expect(capture.appsAfter).toEqual({
+    apps: [{ name: 'Chess demo' }],
+    verifiedHuman: false,
+    sandbox: false,
+  });
 });
+
+for (const level of ['L1', 'L2'] as const)
+  it(`passes the real KYC ${level} outcome through the shared Login API after Continue`, async () => {
+    const capture: { consent?: string; appsAfter?: unknown } = {};
+    const info = await signInToDemoApp({
+      scope: 'openid kyc_level',
+      capture,
+      setup: (db) =>
+        db
+          .prepare('INSERT INTO kyc_status(user_id,level,updated_at) VALUES(?,?,?)')
+          .run('test-user', level, Date.now()),
+    });
+    expect(info.verified_human).toBe(true);
+    expect(info.kyc_level).toBe(level);
+    expect(info.verification_sandbox).toBe(true);
+    expect(capture.consent).toContain('receives your verification status and level when available');
+    expect(capture.appsAfter).toEqual({
+      apps: [{ name: 'Chess demo', sharesVerificationLevel: true }],
+      verifiedHuman: true,
+      sandbox: true,
+    });
+  });
