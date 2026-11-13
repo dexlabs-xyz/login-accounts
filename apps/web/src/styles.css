@@ -337,7 +337,8 @@ h3 { margin: 0.5rem 0 0; }
 .page-title.is-section { font-size: 20px; line-height: 19.447px; margin: 7px 0 34px; }
 /* The Notifications page's card: the same row padding and spacing as Home's card, with no header row. */
 .activity:not(.is-card) .activity-list { padding-top: 24px; }
-.tag-sandbox { font-size: 10px; font-weight: 500; line-height: 14px; padding: 1px 6px; border-radius: 3px; color: var(--orange); background: rgba(249, 115, 22, 0.15); }
+/* Figma (566:10032): 8.75px Medium orange on #431407, 55×18, radius 3.75. */
+.tag-sandbox { font-size: 8.75px; font-weight: 500; line-height: 12.154px; padding: 3px 8px; border-radius: 3.75px; color: var(--orange); background: var(--warn-box); }
 
 /* Private balance */
 .hero { display: grid; gap: 5px; justify-items: start; }
@@ -688,3 +689,20 @@ h3 { margin: 0.5rem 0 0; }
 .unlock-btn:disabled { opacity: 0.7; cursor: default; }
 .unlock-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) { .unlock-spinner { animation: none; } }
+
+/* Verification (Gold's Figma 566:10028 / 566:10029): the level rows (Settings' row style), a 16px line at 60% under
+   them, 19 below the rows and 24 in; the sandbox note at the bottom, level with the sidebar's profile like About. */
+.kyc { display: flex; flex-direction: column; justify-content: space-between; gap: 39px; flex: 1 0 auto; }
+.app-main.is-verification { padding-bottom: 34.3px; }
+.kyc-top { display: grid; gap: 19px; }
+.kyc-caption { margin: 0; padding-left: 24px; max-width: 429px; font-size: 16px; line-height: 19.447px; opacity: 0.6; }
+.kyc-soon { opacity: 0.8; }
+.kyc-note {
+  margin: 0; max-width: 586px; padding: 16px 23px; border-radius: 10px; background: var(--warn-box);
+  font-size: 16px; line-height: 19.447px; color: var(--orange);
+}
+.kyc-note { color: color-mix(in srgb, var(--orange) 60%, transparent); }
+.kyc-skip { display: grid; gap: 10px; padding: 12px 14px; border-radius: 7.88px; background: var(--warn-box); color: var(--orange); font-size: 12px; line-height: 17px; }
+.kyc-skip-actions { flex-wrap: wrap; }
+#sumsub-websdk-container { min-height: 200px; }
+@media (max-width: 820px) { .app-main.is-verification { padding-bottom: 24px; } }

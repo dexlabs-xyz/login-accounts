@@ -3,7 +3,7 @@
  * review, sending and sent screens in the same style. A private send goes to a 0zk address; sending to an
  * Ethereum or Solana address is a withdrawal (public on arrival). The money logic lives in SendPanel.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { SendPanel, type SendMode } from './SendPrivately.tsx';
 
@@ -25,15 +25,34 @@ const PANEL_SUBTITLE: Partial<Record<PanelStep, string>> = {
   sent: 'Sent',
 };
 
-export function SendSheet({ confirmWithPasskey, onClose }: { confirmWithPasskey: () => Promise<boolean>; onClose: () => void }) {
+export function SendSheet({
+  confirmWithPasskey,
+  onClose,
+  open,
+}: {
+  confirmWithPasskey: () => Promise<boolean>;
+  onClose: () => void;
+  /** "View" in Notifications: show this kind of send's screen (its processing screen while it runs). */
+  open?: { mode: SendMode; n: number } | null;
+}) {
   const [trail, setTrail] = useState<Screen[]>(['options']);
   const [pos, setPos] = useState(0);
   const screen = trail[pos]!;
   const [panelStep, setPanelStep] = useState<PanelStep>('form');
+  // Every form you've opened stays mounted, even after stepping back to another one, so a send still running
+  // keeps its screen to come back to.
+  const [mounted, setMounted] = useState<SendMode[]>([]);
   const go = (next: Screen) => {
+    if (next !== 'options') setMounted((m) => (m.includes(next) ? m : [...m, next]));
     setTrail((t) => [...t.slice(0, pos + 1), next]);
     setPos((p) => p + 1);
   };
+  useEffect(() => {
+    if (!open) return;
+    setMounted((m) => (m.includes(open.mode) ? m : [...m, open.mode]));
+    setTrail(['options', open.mode]);
+    setPos(1);
+  }, [open]);
   const back = () => setPos((p) => Math.max(0, p - 1));
   const forward = () => setPos((p) => Math.min(trail.length - 1, p + 1));
   const onStep = useCallback((s: PanelStep) => setPanelStep(s), []);
@@ -87,7 +106,7 @@ export function SendSheet({ confirmWithPasskey, onClose }: { confirmWithPasskey:
             </AnimatePresence>
             {/* The forms stay mounted while you step back and forth, so what you typed is kept. */}
             {(['private', 'evm', 'sol'] as const).map((m) =>
-              trail.includes(m) ? (
+              mounted.includes(m) ? (
                 <div key={m} hidden={screen !== m} data-send-mode={m}>
                   <SendPanel mode={m} confirmWithPasskey={confirmWithPasskey} onBack={back} onDone={onClose} onStep={screen === m ? onStep : noop} />
                 </div>

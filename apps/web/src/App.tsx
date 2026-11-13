@@ -17,7 +17,9 @@ import { usd } from './money.ts';
 import { privateWallet } from './railgun/client.ts';
 import { SEPOLIA_USDC, SEPOLIA_USDT, SEPOLIA_WETH, USDC_DECIMALS, USDT_DECIMALS } from './railgun/protocol.ts';
 import { AddMoney } from './deposits/AddMoney.tsx';
-import { usePendingDeposits } from './deposits/pending.ts';
+import { usePendingDeposits, usePendingSends } from './deposits/pending.ts';
+import { sendJobs } from './send/jobs.ts';
+import type { SendMode } from './send/SendPrivately.tsx';
 import { SendSheet } from './send/SendSheet.tsx';
 import { formatUnits } from './deposits/tidepool.ts';
 import {
@@ -1029,10 +1031,21 @@ function Account({
   };
   // Unfinished deposits stay in Notifications; "Resume" reopens the Receive pop-up at that deposit's address.
   const [resume, setResume] = useState<{ index: number; n: number } | null>(null);
-  const pending = usePendingDeposits((index) => {
+  const deposits = usePendingDeposits((index) => {
     setResume((r) => ({ index, n: (r?.n ?? 0) + 1 }));
     setSheet('receive');
   });
+  // Sends and withdrawals running in this tab: "View" reopens the Send pop-up on their screen (Gold, 13 Nov).
+  const [sendOpen, setSendOpen] = useState<{ mode: SendMode; n: number } | null>(null);
+  const sends = usePendingSends((mode) => {
+    setSendOpen((o) => ({ mode, n: (o?.n ?? 0) + 1 }));
+    setSheet('send');
+  });
+  const pending = [...sends, ...deposits].sort((a, b) => b.when - a.when);
+  // Locking ends the wallet's work in this tab, sends included.
+  useEffect(() => {
+    if (locked) sendJobs.clear();
+  }, [locked]);
   useToastWhile(note, { id: 'account-note', kind: note?.startsWith('Done.') ? 'success' : 'info' });
   useToastWhile(error, { id: 'account-error', kind: 'error' });
   // D4: stays up while every passkey that opens the wallet lives on a single device.
@@ -1066,7 +1079,7 @@ function Account({
     <>
       {/* Outside the pages (so Notifications can reopen Receive, and they keep their state). Send still holds today's forms. */}
       <Modal open={sheet === 'send'} title="Send" onClose={() => setSheet(null)} bare>
-        <SendSheet confirmWithPasskey={confirmWithPasskey} onClose={() => setSheet(null)} />
+        <SendSheet confirmWithPasskey={confirmWithPasskey} onClose={() => setSheet(null)} open={sendOpen} />
       </Modal>
       <Modal open={sheet === 'receive'} title="Receive" onClose={() => setSheet(null)} bare>
         <AddMoney resume={resume} />
@@ -1123,11 +1136,12 @@ function Account({
 
         {page === 'verification' && (
           <>
-            {/* Same title and spacing as Notifications; the status sits in the title row so the card keeps its place. */}
+            {/* Gold's Figma (566:10028), titled "Verification" to match the sidebar (Gold, 13 Nov); each level's status is in the rows. */}
             <h1 className="page-title is-section">
               Verification <span className="tag-sandbox">Sandbox</span>
               {kyc && (
-                <span data-testid="human-status" className={`tag-status${kyc.verifiedHuman ? ' is-ok' : ''}`}>
+                // Not drawn in Figma (the rows say it); kept for screen readers and the sign-in-with-Login test.
+                <span data-testid="human-status" className="visually-hidden">
                   {kyc.verifiedHuman ? `Verified human${kyc.sandbox ? ' · test mode' : ''}` : 'Not verified'}
                 </span>
               )}
@@ -1207,6 +1221,7 @@ function Account({
                     className="set-btn is-danger"
                     onClick={async () => {
                       wallet.lock();
+                      sendJobs.clear();
                       await api('POST', '/api/logout');
                       await refresh();
                     }}

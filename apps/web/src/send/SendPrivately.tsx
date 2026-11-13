@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { privateWallet } from '../railgun/client.ts';
 import { useToast } from '../ui/toast.tsx';
+import { sendJobs } from './jobs.ts';
 import { usd } from '../money.ts';
 import { SEPOLIA_USDT, USDT_DECIMALS } from '../railgun/protocol.ts';
 import { CHAIN_NAMES, formatUnits, loadTokens, toUnits, TidepoolError, type OriginChain, type Quote as SwapQuote, type Token } from '../deposits/tidepool.ts';
@@ -189,7 +190,9 @@ export function SendPanel({
     if (mode === 'sol' && !dest && choices[0]) setDest(choices[0].assetId);
   }, [mode, dest, choices]);
 
-  if (pw.status !== 'ready') return null;
+  // The form needs a synced wallet; a send that's running or done keeps its screen whatever the wallet does next
+  // (it rescans right after a send), so "View" in Notifications always has something to show.
+  if (pw.status !== 'ready' && step.kind !== 'sending' && step.kind !== 'sent') return null;
   const spendableUsdt =
     pw.balances.Spendable?.find((b) => b.tokenAddress.toLowerCase() === SEPOLIA_USDT.toLowerCase())?.amount ?? '0';
   const units = toUnits(amount, USDT_DECIMALS);
@@ -256,6 +259,14 @@ export function SendPanel({
     // D5: every send is confirmed with the passkey, after the summary.
     if (!(await confirmWithPasskey())) return;
     shownProgress.current = 0;
+    // Listed in Notifications while it runs, so the pop-up can be closed and this screen reopened (Gold, 13 Nov).
+    const dest = short(s.swap ? s.swap.to : s.to);
+    const job = sendJobs.start(
+      mode,
+      kind === 'transfer'
+        ? `Sending ${usdt(s.amount)} USDT privately to ${dest}`
+        : `Withdrawing ${usdt(s.amount)} USDT${s.swap ? ` as ${s.swap.token.symbol}` : ''} to ${dest}`,
+    );
     setStep({ kind: 'sending' });
     const w: WithdrawalSwap | null = s.swap
       ? {
@@ -281,10 +292,12 @@ export function SendPanel({
         await saveWithdrawal(s.swap.refund.index, sent).catch(() => {});
         void trackWithdrawal({ ...s.swap.refund, withdrawal: sent });
       }
+      sendJobs.sent(job, txHash);
       setStep({ kind: 'sent', txHash, amount: s.amount, swap: s.swap });
       setTo('');
       setAmount('');
     } catch (e) {
+      sendJobs.drop(job);
       fail(e, 'send');
       setStep({ kind: 'form' });
       if (w && s.swap) {
@@ -459,7 +472,7 @@ export function SendPanel({
               ? `Creating the privacy proof… ${Math.round((shownProgress.current = Math.max(shownProgress.current, pw.sendProgress ?? 0)))}%`
               : 'Submitting through the network relay…'}
           </p>
-          <span className="sheet-note">This takes a little while. You can close this; it keeps going.</span>
+          <span className="sheet-note">This takes a little while. You can close this; it keeps going, and Notifications shows its progress.</span>
         </div>
       )}
 

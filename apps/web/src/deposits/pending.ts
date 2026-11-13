@@ -8,6 +8,8 @@ import type { DepositRecord } from '../railgun/protocol.ts';
 import { depositProgress, track } from './flow.ts';
 import { CHAIN_NAMES, type OriginChain } from './tidepool.ts';
 import { stageText } from './AddMoney.tsx';
+import { useSendJobs } from '../send/jobs.ts';
+import type { SendMode } from '../send/SendPrivately.tsx';
 
 export interface PendingItem {
   key: string;
@@ -15,8 +17,16 @@ export interface PendingItem {
   detail: string;
   /** Unix seconds, for sorting and the date line. */
   when: number;
-  /** "Resume" reopens the deposit's address; "Finish" moves money that arrived into the private balance. */
-  action: { label: 'Resume' | 'Finish'; run: () => void } | null;
+  /**
+   * "Resume" reopens the deposit's address; "Finish" moves money that arrived into the private balance; "View"
+   * reopens the screen of something still being processed (Gold, 13 Nov).
+   */
+  action: { label: 'Resume' | 'Finish' | 'View'; run: () => void } | null;
+  /** Finished: the row says "Successful" until the wallet's history lists the same transaction (`doneTx`). */
+  done?: boolean;
+  doneTx?: string;
+  /** Etherscan, once there's a transaction to show. */
+  href?: string;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -35,6 +45,20 @@ export function usePendingDeposits(onResume: (index: number) => void): PendingIt
   const items: PendingItem[] = [];
   for (const d of pw.deposits) {
     const stage = depositProgress.get(d.index);
+    // Finished while you watched: "Successful" (not a screen to resume) until the history row takes over.
+    if (stage?.kind === 'done' && d.shieldTx) {
+      items.push({
+        key: `deposit-${d.index}`,
+        title: titleOf(d),
+        detail: 'Etherscan',
+        href: `https://sepolia.etherscan.io/tx/${d.shieldTx}`,
+        when: Math.round((d.updatedAt || d.createdAt) / 1000),
+        action: null,
+        done: true,
+        doneTx: d.shieldTx.toLowerCase(),
+      });
+      continue;
+    }
     const canFinish = stage?.kind === 'needs-finish' || stage?.kind === 'late-funds' || (stage?.kind === 'failed' && d.status === 'delivered');
     if (!canFinish && ['new', 'shielded', 'refunded', 'failed'].includes(d.status)) continue;
     const waiting = d.status === 'awaiting-delivery';
@@ -52,8 +76,24 @@ export function usePendingDeposits(onResume: (index: number) => void): PendingIt
         ? { label: 'Finish', run: () => void track({ ...d, status: 'delivered' }) }
         : waiting && !d.withdrawal
           ? { label: 'Resume', run: () => onResume(d.index) }
-          : null,
+          : !d.withdrawal && d.quote
+            ? { label: 'View', run: () => onResume(d.index) } // being processed: reopen its Receive screen
+            : null,
     });
   }
   return items.sort((a, b) => b.when - a.when);
+}
+
+/** Sends and withdrawals from this tab (send/jobs.ts): "View" reopens the Send pop-up on their screen. */
+export function usePendingSends(onView: (mode: SendMode) => void): PendingItem[] {
+  const jobs = useSendJobs();
+  const pw = useSyncExternalStore(privateWallet.subscribe, privateWallet.get);
+  const progress = pw.sendProgress === null || pw.sendProgress < 100 ? `Creating the privacy proof… ${Math.round(pw.sendProgress ?? 0)}%` : 'Submitting through the network relay…';
+  return jobs
+    .map((j): PendingItem =>
+      j.state === 'sent'
+        ? { key: `send-${j.id}`, title: j.title.replace(/^Sending /, 'Sent ').replace(/^Withdrawing /, 'Withdrew '), detail: 'Etherscan', href: `https://sepolia.etherscan.io/tx/${j.txHash}`, when: j.startedAt, action: null, done: true, doneTx: j.txHash }
+        : { key: `send-${j.id}`, title: j.title, detail: progress, when: j.startedAt, action: { label: 'View', run: () => onView(j.mode) } },
+    )
+    .sort((a, b) => b.when - a.when);
 }

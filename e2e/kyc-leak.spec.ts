@@ -18,10 +18,11 @@ test('no secret leaves the device while the Sumsub KYC flow runs (D6)', async ({
 
   await goTo(page, 'Verification');
   const kyc = page.getByRole('region', { name: 'Verification' });
-  await expect(kyc.getByText(/^Sandbox \(test mode\)/)).toBeVisible({ timeout: 30_000 }); // KYC is on
-  await kyc.getByRole('button', { name: /Verify you’re human/ }).click();
+  await expect(kyc.getByRole('note')).toContainText('aren’t real identity checks', { timeout: 30_000 }); // KYC is on (sandbox)
+  // Gold's Figma: each level is a row; Verify opens a pop-up that explains the check, then Continue loads Sumsub.
+  await kyc.locator('[data-level="L1"]').getByRole('button', { name: 'Verify', exact: true }).click();
   const sumsub = page.waitForRequest((r) => /sumsub\.com/.test(new URL(r.url()).hostname), { timeout: 60_000 });
-  await kyc.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('dialog', { name: 'Verify you’re human' }).getByRole('button', { name: 'Continue' }).click();
   await sumsub; // the SDK is loaded and talking to Sumsub
   await page.waitForTimeout(15_000); // let it settle and make its usual calls
 

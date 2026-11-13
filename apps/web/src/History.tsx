@@ -221,10 +221,13 @@ export function Activity({
     return () => ro.disconnect();
   }, [card]);
   const max = card ? Math.min(limit ?? Infinity, fits) : limit;
-  const pend = all || !max ? pending : pending.slice(0, max);
+  // A finished send or deposit shows "Successful" here until the wallet's history lists the same transaction.
+  const listed = new Set((entries ?? []).map((e) => hex(e.txid)));
+  const live = pending.filter((p) => !(p.doneTx && listed.has(p.doneTx)));
+  const pend = all || !max ? live : live.slice(0, max);
   const room = max ? Math.max(0, max - pend.length) : Infinity;
   const shown = entries ? (all || !max ? entries : entries.slice(0, room)) : [];
-  const nothing = entries?.length === 0 && pending.length === 0;
+  const nothing = entries?.length === 0 && live.length === 0;
   const id = `activity-${title.toLowerCase().replace(/\W+/g, '-')}`;
   return (
     <section ref={box} className={`panel activity${card ? ' is-card' : ''}`} aria-labelledby={id}>
@@ -273,18 +276,27 @@ export function Activity({
       {(shown.length > 0 || pend.length > 0) && (
         <ul className="activity-list" data-testid="history">
           {pend.map((p) => (
-            <li key={p.key} data-kind="pending">
+            <li key={p.key} data-kind="pending" data-done={p.done || undefined}>
               <span className="activity-icon" aria-hidden="true">
-                <img src="/img/arrow-down-to-line.svg" alt="" width={18} height={18} />
+                <img src={p.key.startsWith('send-') ? '/img/arrow-up-right.svg' : '/img/arrow-down-to-line.svg'} alt="" width={18} height={18} />
               </span>
               <div className="activity-main">
                 <span className="activity-what">{p.title}</span>
                 <span className="activity-when">
-                  {longDate(p.when)} · {p.detail}
+                  {longDate(p.when)} ·{' '}
+                  {p.href ? (
+                    <a href={p.href} target="_blank" rel="noreferrer">
+                      {p.detail}
+                    </a>
+                  ) : (
+                    p.detail
+                  )}
                 </span>
               </div>
               <div className="activity-side">
-                {p.action ? (
+                {p.done ? (
+                  <span className="activity-status is-done">Successful</span>
+                ) : p.action ? (
                   <button type="button" className="activity-action" onClick={p.action.run}>
                     {p.action.label}
                   </button>

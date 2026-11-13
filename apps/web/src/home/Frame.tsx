@@ -180,7 +180,7 @@ export function Frame({
         <Account email={email} hidden={hidden} onToggleHidden={onToggleHidden} />
       </header>
       {/* Home is centred top to bottom like the Figma frame; longer pages start at the top and scroll. */}
-      <main className={`app-main${page === 'home' ? ' is-home' : ' is-long'}${page === 'settings' ? ' is-settings' : ''}`} key={page}>
+      <main className={`app-main${page === 'home' ? ' is-home' : ' is-long'}${page === 'settings' ? ' is-settings' : page === 'verification' ? ' is-verification' : ''}`} key={page}>
         {children}
       </main>
       {nav('tabs')}

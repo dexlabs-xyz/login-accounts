@@ -57,7 +57,10 @@ test in the same change and say so:
   Use `useToastWhile(text, options)` from `ui/toast.tsx`. e2e helpers: `errorToast`, `toastWith(page, text)`.
   Content that belongs to a screen stays on it: Syncing % next to the balance, Send/Receive steps and their review
   warnings, the verification stages, the broken sign-in link page.
-  Unfinished deposits sit at the top of Notifications (`li[data-kind="pending"]`, Resume / Finish).
+  Unfinished deposits sit at the top of Notifications (`li[data-kind="pending"]`, Resume / Finish). Since 13 Nov:
+  sends and withdrawals running in this tab are listed there too ("Sending … / Withdrawing …", **View** reopens the
+  Send pop-up on its processing screen; `send/jobs.ts`, memory only), deposits being processed get **View** (reopens
+  Receive), and anything finished shows "Successful" (`data-done`) until the history row with the same tx appears.
   Locked wallet (Gold, 13 Nov): every page keeps its layout; a pop-up `role="dialog"` named **Your wallet is locked**
   opens by itself, with one **Unlock** button (spinner while waiting, then a ring and a check that draw themselves).
   It can be closed (Esc); Home's buttons and Settings › Status › **Unlock** open it again. e2e: `unlockWallet`,
@@ -76,7 +79,8 @@ test in the same change and say so:
   and "Wallet check" is screen-reader-only text), Add your phone, Add a security key,
   Connect, Remove, Remove it, Keep for signing in, Retry sync,
   Review, Back, Confirm with passkey, Withdraw again, Get deposit address,
-  From an Ethereum wallet, From Solana, "Verify you’re human…",
+  From an Ethereum wallet, From Solana, Verify (a row per level on Verification, 13 Nov; was "Verify you’re human…";
+  it opens a pop-up "Verify you’re human" / "Verify your identity" with Not now / Continue, then Sumsub inside it),
   Allow and continue, Cancel and go back to the app, View on Sepolia Etherscan.
 - **Labels:** Email, 6-digit code, Amount (USDT), Amount, Send from,
   "To (private 0zk address)", "To (public 0x address on Ethereum Sepolia)",
