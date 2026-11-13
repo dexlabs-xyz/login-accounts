@@ -35,7 +35,7 @@ const ERRORS: Record<string, string> = {
   'fee-too-high': 'The network fee quoted is unusually high, so we stopped. Try again later.',
   'quote-expired': 'The fee quote expired. Review it again.',
   'broadcaster-refused':
-    'The network relays turned this down (we tried three), so nothing was sent. Wait a minute, then press Review again.',
+    'The network relays turned this down, so nothing was sent. Wait a minute, then press Review again.',
   'still-confirming':
     'Your last transaction is still being confirmed, so its money can’t be used yet. Nothing was sent. Wait a minute, then press Review again.',
   'Wallet locked.': 'Your wallet locked. Unlock and try again.',

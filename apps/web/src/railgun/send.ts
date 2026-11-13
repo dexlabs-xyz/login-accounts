@@ -51,6 +51,12 @@ const FIND_BROADCASTER_MS = 60_000;
  * refusal tries the next most reliable one by itself instead of asking the user to press Review again.
  */
 const MAX_BROADCASTER_TRIES = 3;
+/**
+ * Wait before trying again. Seen live (13 Nov): "Could not validate Proof of Innocence", for funds that had cleared
+ * for our wallet 90 seconds earlier. The broadcaster's privacy-check data lags behind ours, so an instant retry
+ * elsewhere fails the same way; a little later it goes through.
+ */
+const RETRY_AFTER_MS = 30_000;
 
 
 export interface SendContext {
@@ -270,13 +276,19 @@ export function createSender(ctx: SendContext) {
         } catch (e) {
           if (!(e instanceof SendError && e.code === 'broadcaster-refused') || attempt >= MAX_BROADCASTER_TRIES) throw e;
           ctx.onRetry(attempt);
+          await sleep(RETRY_AFTER_MS);
           let next: PendingQuote;
           try {
             next = takeQuote((await api.quote(q.params)).quoteId); // the refused broadcaster is filtered out now
-          } catch {
-            throw e; // no other broadcaster (or the wallet changed): report the refusal
+          } catch (why) {
+            // No other broadcaster (or the wallet changed): report the refusal. Development builds say why it stopped.
+            if (import.meta.env.DEV) console.error('[railgun send] retry stopped: re-quote failed', why instanceof Error ? why.message : why);
+            throw e;
           }
-          if (next.fee > approvedFee) throw e;
+          if (next.fee > approvedFee) {
+            if (import.meta.env.DEV) console.error('[railgun send] retry stopped: next fee higher', next.fee.toString(), approvedFee.toString());
+            throw e;
+          }
           q = next;
         }
       }

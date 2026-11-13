@@ -61,6 +61,7 @@ let unshieldFeeBasisPoints: string | null = null;
  */
 const POI_REFRESH_MS = 60_000;
 let hasPendingReceive = false;
+const pendingByBucket = { ShieldPending: false, MissingExternalPOI: false };
 let poiTimer: ReturnType<typeof setTimeout> | undefined;
 
 async function refreshPOIs() {
@@ -202,7 +203,11 @@ function startEngine(poiNodeURLs: string[]) {
         for (const a of e.erc20Amounts) spendable.set(a.tokenAddress.toLowerCase(), a.amount);
       }
       if (e.balanceBucket === 'ShieldPending' || e.balanceBucket === 'MissingExternalPOI') {
-        const pending = e.erc20Amounts.some((a) => a.amount > 0n);
+        // One flag per bucket: the SDK reports every bucket on each update (empty ones too), so a single shared flag
+        // was set by ShieldPending and cleared by the empty MissingExternalPOI report right after, which cancelled
+        // the once-a-minute check and left new funds "being checked" until the next unlock (found 13 Nov).
+        pendingByBucket[e.balanceBucket] = e.erc20Amounts.some((a) => a.amount > 0n);
+        const pending = pendingByBucket.ShieldPending || pendingByBucket.MissingExternalPOI;
         if (pending !== hasPendingReceive) {
           hasPendingReceive = pending;
           schedulePOIRefresh();

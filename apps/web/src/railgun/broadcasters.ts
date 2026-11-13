@@ -30,7 +30,9 @@ export function pickBroadcaster<T extends BroadcasterChoice>(candidates: readonl
  * anything address- or hash-like is cut out anyway. So the next refusal says why instead of leaving us guessing.
  */
 export function refusalReason(e: unknown): string | undefined {
-  const cause = e instanceof Error ? e.cause : undefined;
+  // The broadcaster's text is the innermost cause: SendError → "Received response error from broadcaster." → its reason.
+  let cause: unknown = e instanceof Error ? e.cause : undefined;
+  for (let i = 0; i < 5 && cause instanceof Error && cause.cause !== undefined; i++) cause = cause.cause;
   const text = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
   const clean = text
     .replace(/0x[0-9a-fA-F]{8,}/g, '…')

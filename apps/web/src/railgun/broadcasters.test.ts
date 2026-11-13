@@ -18,7 +18,8 @@ describe('pickBroadcaster', () => {
 });
 
 describe('refusalReason', () => {
-  const refused = (cause: unknown) => new Error('Received response error from broadcaster.', { cause });
+  // As send.ts sees it: SendError → the client's "Received response error from broadcaster." → the broadcaster's text.
+  const refused = (cause: unknown) => new Error('broadcaster-refused', { cause: new Error('Received response error from broadcaster.', { cause }) });
   it('gives the broadcaster’s own text', () => {
     expect(refusalReason(refused(new Error('Broadcaster cannot process this transaction.')))).toBe('Broadcaster cannot process this transaction.');
   });
@@ -29,5 +30,10 @@ describe('refusalReason', () => {
   it('is short, and nothing when there is no reason', () => {
     expect(refusalReason(refused(new Error('x'.repeat(400))))!.length).toBeLessThanOrEqual(140);
     expect(refusalReason(new Error('no cause'))).toBeUndefined();
+  });
+  it('reads the real reason seen live on 13 Nov', () => {
+    expect(refusalReason(refused(new Error('Could not validate Proof of Innocence - Broadcaster cannot process this transaction.')))).toBe(
+      'Could not validate Proof of Innocence - Broadcaster cannot process this transaction.',
+    );
   });
 });
