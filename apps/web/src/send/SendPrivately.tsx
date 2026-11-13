@@ -26,9 +26,10 @@ const ERRORS: Record<string, string> = {
   'invalid-address': 'That address isn’t valid.',
   'own-deposit-address':
     'That’s one of your own Login deposit addresses. It’s publicly linked to your deposits, so withdrawing there would undo the privacy. Use a different address.',
-  'insufficient-usdt': 'You don’t have that much spendable USDT. Deposits become spendable once their privacy check clears.',
+  'insufficient-usdt':
+    'You don’t have that much spendable USDT. New deposits become spendable once their privacy check clears. What’s left over after a send stays locked on this test network, so add money to send more.',
   'insufficient-fee-balance':
-    'Your network-fee reserve isn’t ready, so this can’t be sent yet. Right after a send or withdrawal, it goes through the privacy check again (your balance shows “Network fees: being set up”). Try again once it shows “Network fees are covered”. If it’s used up, your next deposit refills it.',
+    'There’s nothing spendable to pay the network fee, so nothing was sent. On this test network, what’s left after a send or withdrawal stays locked, so each deposit covers one transaction. Add money (for example 0.003 ETH from Add money), or if a deposit is still being checked, try again once it clears.',
   'no-broadcaster': 'No network relay is available right now. Try again in a minute.',
   'fee-too-high': 'The network fee quoted is unusually high, so we stopped. Try again later.',
   'quote-expired': 'The fee quote expired. Review it again.',

@@ -134,7 +134,9 @@ const BUCKET_LABELS: Record<string, string> = {
   ShieldPending: 'Arriving (being checked)',
   ShieldBlocked: 'Blocked by sanctions screening',
   ProofSubmitted: 'Being confirmed',
-  MissingInternalPOI: 'Waiting for privacy check',
+  // What's left after your own send or withdrawal. On Sepolia it never clears (Railgun's broken testnet index; README,
+  // Known limit), so don't promise a wait (Gold, 13 Nov).
+  MissingInternalPOI: 'left over from your last send, locked on this test network',
   MissingExternalPOI: 'Waiting for privacy check',
 };
 
@@ -238,7 +240,15 @@ function PrivateBalance({
   // One currency on screen: the private ETH that pays network fees (testnet only) is not shown as a balance.
   const rows = all.filter((r) => !isReserve(r.tokenAddress));
   const reserve = all.filter((r) => isReserve(r.tokenAddress));
-  const reserveState = reserve.some((r) => r.bucket === 'Spendable') ? 'ready' : reserve.length ? 'pending' : 'empty';
+  // pending: a new deposit's reserve, still in its privacy check (it clears). used: only what was left after a send,
+  // which stays locked on Sepolia (README, Known limit), so only a new deposit covers fees again.
+  const reserveState = reserve.some((r) => r.bucket === 'Spendable')
+    ? 'ready'
+    : reserve.some((r) => r.bucket === 'ShieldPending' || r.bucket === 'MissingExternalPOI')
+      ? 'pending'
+      : reserve.length
+        ? 'used'
+        : 'empty';
   const money = (address: string, amount: string) => {
     const t = KNOWN_TOKENS[address.toLowerCase()];
     if (hidden) return '••••';
@@ -294,14 +304,16 @@ function PrivateBalance({
             <p
               // "Network fees are covered." is the normal state, so it isn't shown (Gold, 13 Nov); kept for screen readers
               // and the tests. Only a reserve that's still being set up shows.
-              className={reserveState === 'pending' ? 'hero-status' : 'visually-hidden'}
+              className={reserveState === 'pending' || reserveState === 'used' ? 'hero-status' : 'visually-hidden'}
               data-testid={`fee-reserve-${reserveState}`}
             >
               {reserveState === 'ready'
                 ? 'Network fees are covered.'
                 : reserveState === 'pending'
                   ? 'Network fees: being set up. Covered once your new funds clear.'
-                  : 'Your next deposit sets aside a little to cover network fees for sending and withdrawing.'}
+                  : reserveState === 'used'
+                    ? 'Network fees: used up. Add money to cover them again.'
+                    : 'Your next deposit sets aside a little to cover network fees for sending and withdrawing.'}
             </p>
           )}
         </div>
