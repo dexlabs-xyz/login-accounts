@@ -197,7 +197,10 @@ test.describe('multiple passkeys (D1, D4)', () => {
     await passkeyRows(page).filter({ hasText: 'can’t open wallets' }).getByRole('button', { name: 'Remove' }).click();
     await expect(passkeyRows(page)).toHaveCount(1);
     await expect(panel).toHaveCount(0);
-    await expect(errorToast(page), (await errorToast(page).textContent().catch(() => '')) ?? '').toHaveCount(0); // no stale error either
+    // No stale passkey error either. (The wallet's "Couldn't load your private balance" is expected here: this file
+    // blocks Railgun's network in beforeEach, so the wallet can't sync.)
+    const stale = page.locator('[data-sonner-toast][data-type="error"]').filter({ hasNotText: 'Couldn’t load your private balance' });
+    await expect(stale, (await stale.allTextContents().catch(() => [])).join(' | ')).toHaveCount(0);
   });
 
   test('a passkey added while the wallet was locked can be connected later, then opens the wallet alone', async ({ page }) => {
