@@ -401,7 +401,15 @@ export function AddMoney({ resume }: { resume?: { index: number; n: number } | n
                           <input
                             value={solanaRefund}
                             aria-invalid={!!solanaRefund && !solanaOk}
-                            onChange={(e) => setSolanaRefund(e.target.value)}
+                            onChange={(e) => {
+                              setSolanaRefund(e.target.value);
+                              if (isValidAddress('sol', e.target.value.trim())) toast.dismiss('sol-refund');
+                            }}
+                            // Red outline while it's wrong; the words come once you leave the field, not while typing (Gold, 13 Nov).
+                            onBlur={(e) => {
+                              const v = e.target.value.trim();
+                              if (v && !isValidAddress('sol', v)) toast.show({ id: 'sol-refund', kind: 'error', text: 'That isn’t a Solana address.' });
+                            }}
                             placeholder="Your Solana address"
                             aria-describedby="refund-why"
                             required

@@ -196,11 +196,12 @@ function WalletStatusToasts() {
     description: `Stuck at ${Math.round(pw.scanProgress * 100)}%. One of the networks your wallet reads from may be slow. Your funds aren’t affected.`,
     action: { label: 'Retry sync', onClick: retrySync },
   });
-  useToastWhile(pw.status === 'error' ? 'Couldn’t load your private balance. Reload the page and unlock to try again.' : null, {
+  useToastWhile(pw.status === 'error' ? 'Couldn’t load your private balance. Your funds aren’t affected. Reload the page to try again.' : null, {
     id: 'wallet-error',
     kind: 'error',
     // Only the error's type name (e.g. TypeError), never its message: safe to show, and it tells us where to look.
-    description: pw.error ? `Error code: ${pw.error}` : undefined,
+    // A plain "Error" tells nobody anything, so it's left out.
+    description: pw.error && pw.error !== 'Error' ? `Error code: ${pw.error}` : undefined,
   });
   return null;
 }
