@@ -77,7 +77,7 @@
    orange warning, green/red status, the blue mail badge) and photos stay as they are. :where() keeps this weaker than
    any icon's own rule (e.g. the black plus on the blue button). The copy button's icons are animated with a blur
    filter of their own, so their box is flipped instead. */
-:where(img[src^='/img/']:not([src*='chain-'], [src*='alert-triangle'], [src*='check-circled'], [src*='x-circled'], [src*='mail-badge'], [src$='.png'], .copy-icons img)),
+:where(img[src^='/img/']:not([src*='chain-'], [src*='alert-triangle'], [src*='mail-badge'], [src$='.png'], .copy-icons img)),
 :where(.copy-icons) { filter: var(--icon-filter); }
 * { box-sizing: border-box; }
 /* The page colour sits on <html> too, so overscroll and browser chrome never show a different shade. */
@@ -490,6 +490,9 @@ h3 { margin: 0.5rem 0 0; }
 /* The first button pushes the pair to the right; 6px between them, as in Settings. */
 [data-sonner-toaster] [data-sonner-toast].login-toast [data-button] { margin-left: 6px; }
 [data-sonner-toaster] [data-sonner-toast].login-toast [data-content] + [data-button] { margin-left: auto; }
+/* Error toasts with a link (Details on GitHub): the button sits on the left, under the text (Gold, 13 Nov). 23px is
+   where Sonner starts the text after its icon: -3px margin + 16px icon + 4px margin + 6px gap. */
+[data-sonner-toaster] [data-sonner-toast].login-toast[data-type='error'] [data-content] + [data-button] { margin-left: 23px; margin-right: auto; }
 
 /* ---------- Phones: top bar + bottom tabs instead of the sidebar ---------- */
 @media (max-width: 820px) {
@@ -706,3 +709,7 @@ h3 { margin: 0.5rem 0 0; }
 .kyc-skip-actions { flex-wrap: wrap; }
 #sumsub-websdk-container { min-height: 200px; }
 @media (max-width: 820px) { .app-main.is-verification { padding-bottom: 24px; } }
+.blank { flex: 1; }
+/* A line of text under a Welcome title used as the message itself (e.g. the broken sign-in link page). */
+.welcome-lead { margin: -12px 0 0; text-align: center; font-size: 18px; line-height: 25px; opacity: 0.7; }
+.welcome-spinner { display: block; } /* loader-spinning.svg turns by itself */

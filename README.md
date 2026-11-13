@@ -8,7 +8,34 @@ chains, built on **NEAR Intents** and **Railgun**.
 - **Live demo:** https://demo.withlogin.com (Sepolia testnet)
 - **Design decisions:** [docs/design/passkeys.md](docs/design/passkeys.md)
 
-<!-- TODO(Gold): the one-paragraph concept explanation goes here, from Gold's write-up. -->
+## Why Login
+
+When AI can imitate anything a person writes, says or shows, a login that
+only proves "someone knows this password" stops meaning much. We think the
+login that lasts proves **a real human is behind the account**, once, and
+lets that proof travel with what the person does online.
+
+We anchor it on two things AI can't easily manufacture:
+
+- **Money.** It's scarce, and every person moves it. Even in an "agent
+  economy", agents move money on behalf of people; they don't create it.
+- **Identity documents.** Every person has them, and they're still hard to
+  fake at scale.
+
+So Login is one account that:
+
+1. **signs you in anywhere** with a passkey: no password, no seed phrase
+   *(built)*;
+2. **moves money privately, across chains and borders**: Railgun for
+   privacy, NEAR Intents for any token on any chain *(built, testnet)*;
+3. **proves you're human** to the apps you choose without handing over your
+   identity: Sumsub KYC, shared only as "verified human" *(built, Sumsub
+   sandbox)*;
+4. later, **lets apps prove content came from a verified human** *(next, not
+   built)*.
+
+This hackathon build is the first step: identity and money in one private
+account.
 
 ## Try it in 5 minutes
 
@@ -46,8 +73,9 @@ works as the passkey). Each step says what you should see.
    uses Login): the consent screen says exactly what the app will see (an ID only that app
    gets, and whether you're a verified human), never your email.
 
-Each account can make one send or withdrawal per deposit (see *Known limit*
-below), so a new account can try one of step 5 or step 6 after the test funds.
+Keep each send or withdrawal to **10 USDT or less**: the test funds arrive
+as 25 pieces of 10 USDT, and on Sepolia each piece pays for one transaction
+(see *Known limit on Sepolia* below).
 
 ## What you can do
 
@@ -171,12 +199,32 @@ Also worth knowing:
 
 - New deposits wait for Railgun's privacy check ("being checked"), from a few
   minutes to about two hours, before they can be spent.
-- **Known limit on Sepolia:** after a send or withdrawal, the leftover
-  (including the fee reserve) stays "Waiting for privacy check" and doesn't
-  clear. The likely cause is Railgun's broken public Sepolia transaction
-  index (see the design doc). In practice, **each
-  deposit pays for one transaction**: an account with three deposits can make
-  three sends or withdrawals. Parked until after the hackathon.
+- **Known limit on Sepolia**: what's left over after a send stays locked
+  (next section).
+
+### Known limit on Sepolia: leftovers stay locked
+
+**What you'll see:** after a send or withdrawal, what's left of the money it
+used shows as "left over from your last send, locked on this test network"
+and never becomes spendable. Money received in a private send from another
+account most likely stays "waiting for privacy check" the same way.
+
+**Why:** Railgun only lets money move once it has passed its privacy check
+(Proof of Innocence). For money coming in from outside (test funds,
+deposits), Railgun's own service runs that check, and it clears in minutes.
+For the outputs of a private send (your leftover and the recipient's money),
+the *sender's* wallet must produce the proof, and that needs Railgun's public
+transaction index for Sepolia. That index is broken (its checksum chain stops
+at position 4188, block 11816741; see the design doc), so the proof can't be
+made. This is Railgun's testnet, not Login's code; on mainnet the index works
+and leftovers clear normally. If Railgun repairs it, locked amounts should
+clear on their own.
+
+**What we did about it:** Railgun spends the smallest pieces of money that
+cover a send, so the test funds arrive as **25 pieces of 10 USDT**. Each send
+or withdrawal of 10 USDT or less uses one piece, so one claim pays for up to
+25 transactions. Bigger amounts work too; they just use more pieces. Your own
+deposits arrive as one piece each.
 
 ### Not built yet (next)
 

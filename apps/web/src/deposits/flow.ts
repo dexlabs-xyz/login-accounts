@@ -312,11 +312,15 @@ async function runSwap(index: number, swaps: DepositSwap[], s: DepositSwap): Pro
   await saveSwaps(index, swaps);
 }
 
-/** The hidden private ETH reserve for broadcaster fees, cleared or still being checked. */
+/**
+ * The hidden private ETH reserve for broadcaster fees, cleared or still being checked. Not what's left after a send
+ * (MissingInternalPOI): on Sepolia it never clears (README, Known limit), so counting it made a new deposit skip
+ * setting fees aside.
+ */
 function feeReserveWei(): bigint {
   const b = privateWallet.get().balances;
   let total = 0n;
-  for (const bucket of ['Spendable', 'ShieldPending', 'MissingInternalPOI', 'MissingExternalPOI'] as const) {
+  for (const bucket of ['Spendable', 'ShieldPending', 'MissingExternalPOI'] as const) {
     for (const t of b[bucket] ?? []) if (t.tokenAddress.toLowerCase() === SEPOLIA_WETH.toLowerCase()) total += BigInt(t.amount);
   }
   return total;

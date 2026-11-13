@@ -12,6 +12,7 @@ import { SEPOLIA_USDT, USDT_DECIMALS } from '../railgun/protocol.ts';
 import { CHAIN_NAMES, formatUnits, loadTokens, toUnits, TidepoolError, type OriginChain, type Quote as SwapQuote, type Token } from '../deposits/tidepool.ts';
 import { depositProgress, prepareSwapWithdrawal, saveWithdrawal, trackWithdrawal } from '../deposits/flow.ts';
 import type { DepositRecord, WithdrawalSwap } from '../railgun/protocol.ts';
+import { StatusIcon } from '../ui/StatusIcon.tsx';
 
 type Kind = 'transfer' | 'unshield';
 
@@ -26,25 +27,32 @@ const ERRORS: Record<string, string> = {
   'invalid-address': 'That address isn’t valid.',
   'own-deposit-address':
     'That’s one of your own Login deposit addresses. It’s publicly linked to your deposits, so withdrawing there would undo the privacy. Use a different address.',
-  'insufficient-usdt': 'You don’t have that much spendable USDT. Deposits become spendable once their privacy check clears.',
+  'insufficient-usdt':
+    'You don’t have that much spendable USDT. New deposits become spendable once their privacy check clears. What’s left over after a send stays locked: a real Railgun testnet bug we haven’t found a workaround for.',
   'insufficient-fee-balance':
-    'Your network-fee reserve isn’t ready, so this can’t be sent yet. Right after a send or withdrawal, it goes through the privacy check again (your balance shows “Network fees: being set up”). Try again once it shows “Network fees are covered”. If it’s used up, your next deposit refills it.',
+    'There’s nothing spendable to pay the network fee, so nothing was sent. On this test network, what’s left after a send or withdrawal stays locked, so each deposit covers one transaction. Add money (for example 0.003 ETH from Add money), or if a deposit is still being checked, try again once it clears.',
   'no-broadcaster': 'No network relay is available right now. Try again in a minute.',
   'fee-too-high': 'The network fee quoted is unusually high, so we stopped. Try again later.',
   'quote-expired': 'The fee quote expired. Review it again.',
   'broadcaster-refused':
-    'The network relay couldn’t confirm the privacy check on your funds, so nothing was sent. Press Review again to use a different relay.',
+    'The network relays turned this down, so nothing was sent. Wait a minute, then press Review again.',
   'still-confirming':
     'Your last transaction is still being confirmed, so its money can’t be used yet. Nothing was sent. Wait a minute, then press Review again.',
   'Wallet locked.': 'Your wallet locked. Unlock and try again.',
   'swap-mismatch': 'The swap quote didn’t match the withdrawal, so we stopped. Review it again.',
 };
+/** README › Known limit on Sepolia (the default branch, which is what judges read). */
+const KNOWN_LIMIT_URL = 'https://github.com/dexlabs-xyz/login-accounts#known-limit-on-sepolia-leftovers-stay-locked';
+
 const explain = (e: unknown, kind: Kind) =>
   (e instanceof TidepoolError &&
     (/capped/i.test(e.message)
       ? 'Tidepool’s testnet sends at most 0.006 ETH per withdrawal (about 12 USDT). Withdraw less, or choose USDC.'
       : 'Tidepool couldn’t price this swap right now. Try again, or withdraw as USDT.')) ||
-  (e instanceof Error && ERRORS[e.message]) ||
+  (e instanceof Error &&
+    ERRORS[e.message] &&
+    // The relay's own reason, so a refusal says why (Gold, 13 Nov). Its text, never wallet data (send.ts).
+    `${ERRORS[e.message]}${(e as Error & { reason?: string }).reason ? ` Relay said: “${(e as Error & { reason?: string }).reason}”` : ''}`) ||
   (kind === 'transfer' ? 'The send didn’t go through. Nothing was sent.' : 'The withdrawal didn’t go through. Nothing was sent.');
 
 /**
@@ -169,15 +177,29 @@ export function SendPanel({
   const fail = (e: unknown, stage: string) => {
     const msg = explain(e, kind);
     setError(msg);
-    toast.show({ kind: 'error', text: msg });
     const m = e instanceof Error ? e.message : '';
+    // The Sepolia limit gets a link to the README's explanation (Gold, 13 Nov).
+    toast.show({
+      kind: 'error',
+      text: msg,
+      ...(m === 'insufficient-usdt' && { action: { label: 'Details on GitHub', onClick: () => window.open(KNOWN_LIMIT_URL, '_blank', 'noopener') } }),
+    });
     if (m === 'insufficient-usdt' || /capped/i.test(m)) setAmountBad(true);
     if (m === 'invalid-address' || m === 'own-deposit-address') setToBad(true);
     const d = import.meta.env.DEV && e instanceof Error ? (e as Error & { devDetail?: string }).devDetail : undefined;
     setDevDetail(d ? `${stage}: ${e instanceof Error ? e.message : ''}\n${d}` : import.meta.env.DEV && e instanceof Error ? `${stage}: ${e.message}` : '');
   };
-  // The SDK reports progress per proof stage, so it can restart at 0. Never show it going back.
+  // The SDK reports progress per proof stage, so it can restart at 0. Never show it going back,
+  // except when another relay is tried: that's a new proof, from 0 (Gold, 13 Nov).
   const shownProgress = useRef(0);
+  const lastRetries = useRef(0);
+  const retriesSeen = (n: number) => {
+    if (n !== lastRetries.current) {
+      lastRetries.current = n;
+      shownProgress.current = 0;
+    }
+    return true;
+  };
   const [price, setPrice] = useState<number | null>(null);
   useEffect(() => {
     void ethPrice().then(setPrice);
@@ -468,6 +490,7 @@ export function SendPanel({
         <div className="sheet-body sheet-progress">
           <img src="/img/loader-spinning.svg" alt="" width={28} height={28} />
           <p role="status" data-testid={`${kind}-status`}>
+            {retriesSeen(pw.sendRetries) && pw.sendRetries > 0 && (pw.sendProgress === null || pw.sendProgress < 100) ? 'Trying another relay… ' : ''}
             {pw.sendProgress === null || pw.sendProgress < 100
               ? `Creating the privacy proof… ${Math.round((shownProgress.current = Math.max(shownProgress.current, pw.sendProgress ?? 0)))}%`
               : 'Submitting through the network relay…'}
@@ -478,7 +501,7 @@ export function SendPanel({
 
       {step.kind === 'sent' && (
         <div className="sheet-body sheet-progress">
-          <img src="/img/check-circled.svg" alt="" width={28} height={28} />
+          <StatusIcon kind="ok" size={28} />
           <p role="status" data-testid={`${kind}-status`}>
             {step.swap ? swapStatus(step.amount, step.swap, depositProgress.get(step.swap.refund.index)) : copy.sent(step.amount)}
           </p>

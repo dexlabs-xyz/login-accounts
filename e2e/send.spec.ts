@@ -3,7 +3,7 @@
  * broadcaster. Slow (deposit + privacy checks + proof). TESTNET ONLY.
  */
 import { expect, test } from '@playwright/test';
-import { chooseSend, Device, disableAutofill, errorTexts, signUp } from './helpers.ts';
+import { chooseSend, Device, disableAutofill, errorTexts, signUp, unlockWallet } from './helpers.ts';
 import { fundedAccount, log, watch } from './live.ts';
 
 test.describe.configure({ timeout: 180 * 60_000 });
@@ -23,7 +23,10 @@ test('A sends USDT privately to B through a broadcaster', async ({ page, browser
   const addressB = (await cardB.locator('code.address').getAttribute('title', { timeout: 120_000 }))!;
   expect(addressB).toMatch(/^0zk/);
 
-  // --- A sends 0.5 USDT to B: review shows the fee, confirm with passkey, proof, broadcaster.
+  // --- A sends 0.5 USDT to B, then again: test funds arrive in 5 pieces, so the second send works too (13 Nov).
+  for (const round of [1, 2]) {
+  say(`--- send ${round}`);
+  if (round === 2) await page.reload().then(() => unlockWallet(page));
   const send = await chooseSend(page, 'Privately via Railgun');
   await send.getByLabel('0zk address').fill(addressB);
   await send.getByLabel('Enter amount').fill('0.5');
@@ -45,10 +48,12 @@ test('A sends USDT privately to B through a broadcaster', async ({ page, browser
     if (sent) break;
     const errors = await errorTexts(page);
     say(`confirm attempt ${attempt}: ${errors}`);
-    if (!/network relay couldn’t confirm/.test(errors) || attempt >= 4) throw new Error(`Send failed: ${errors}`);
+    // The app already tries up to 3 relays by itself ("Trying another relay…"); this is when all of them refused.
+    if (!/relays turned this down/.test(errors) || attempt >= 4) throw new Error(`Send failed: ${errors}`);
     await send.getByRole('button', { name: 'Review' }).click();
   }
   say(`tx: ${await send.getByRole('link', { name: /View on Sepolia Etherscan/ }).getAttribute('href')}`);
+  }
 
   // --- B sees the USDT arrive (it may still be "being checked").
   await expect(cardB.getByText('USDT')).toBeVisible({ timeout: 10 * 60_000 });
