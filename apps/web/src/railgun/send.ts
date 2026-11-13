@@ -37,6 +37,7 @@ import {
 import { BroadcasterTransaction, WakuBroadcasterClient } from '@railgun-community/waku-broadcaster-client-web';
 import { getAddress, isAddress, JsonRpcProvider, ZeroAddress } from 'ethers';
 import { SEPOLIA_USDT, SEPOLIA_WETH } from './protocol.ts';
+import { pickBroadcaster } from './broadcasters.ts';
 
 const NETWORK = NetworkName.EthereumSepolia;
 const CHAIN = NETWORK_CONFIG[NETWORK].chain;
@@ -109,7 +110,8 @@ export function createSender(ctx: SendContext) {
     await started;
     const t0 = Date.now();
     for (;;) {
-      const b = WakuBroadcasterClient.findBestBroadcaster(CHAIN, SEPOLIA_WETH, false);
+      // The most reliable, not the client's cheapest pick (see broadcasters.ts). Skips any that refused us.
+      const b = pickBroadcaster<SelectedBroadcaster>(WakuBroadcasterClient.findBroadcastersForToken(CHAIN, SEPOLIA_WETH, false));
       if (b) return b;
       if (Date.now() - t0 > FIND_BROADCASTER_MS) throw new SendError('no-broadcaster');
       await sleep(3_000);
