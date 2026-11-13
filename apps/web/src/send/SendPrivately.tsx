@@ -12,6 +12,7 @@ import { SEPOLIA_USDT, USDT_DECIMALS } from '../railgun/protocol.ts';
 import { CHAIN_NAMES, formatUnits, loadTokens, toUnits, TidepoolError, type OriginChain, type Quote as SwapQuote, type Token } from '../deposits/tidepool.ts';
 import { depositProgress, prepareSwapWithdrawal, saveWithdrawal, trackWithdrawal } from '../deposits/flow.ts';
 import type { DepositRecord, WithdrawalSwap } from '../railgun/protocol.ts';
+import { StatusIcon } from '../ui/StatusIcon.tsx';
 
 type Kind = 'transfer' | 'unshield';
 
@@ -479,7 +480,7 @@ export function SendPanel({
 
       {step.kind === 'sent' && (
         <div className="sheet-body sheet-progress">
-          <img src="/img/check-circled.svg" alt="" width={28} height={28} />
+          <StatusIcon kind="ok" size={28} />
           <p role="status" data-testid={`${kind}-status`}>
             {step.swap ? swapStatus(step.amount, step.swap, depositProgress.get(step.swap.refund.index)) : copy.sent(step.amount)}
           </p>

@@ -59,7 +59,7 @@ test in the same change and say so:
   (a toast with Keep for signing in / Remove it), a stalled sync (toast with Retry sync), sign-up errors and KYC errors.
   Use `useToastWhile(text, options)` from `ui/toast.tsx`. e2e helpers: `errorToast`, `toastWith(page, text)`.
 - **Marks on coloured fills** (text on the blue buttons, the email field's green tick and red cross): black in dark
-  mode, white in light, via `--on-accent` (Gold, 13 Nov). The tick and cross are inline SVG (`StatusIcon` in App.tsx) for this.
+  mode, white in light, via `--on-accent` (Gold, 13 Nov). The tick and cross are `ui/StatusIcon.tsx` (inline SVG), also on the Send "Sent" screen.
   Content that belongs to a screen stays on it: Syncing % next to the balance, Send/Receive steps and their review
   warnings, the verification stages, the broken sign-in link page.
   Unfinished deposits sit at the top of Notifications (`li[data-kind="pending"]`, Resume / Finish). Since 13 Nov:

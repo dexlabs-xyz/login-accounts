@@ -77,7 +77,7 @@
    orange warning, green/red status, the blue mail badge) and photos stay as they are. :where() keeps this weaker than
    any icon's own rule (e.g. the black plus on the blue button). The copy button's icons are animated with a blur
    filter of their own, so their box is flipped instead. */
-:where(img[src^='/img/']:not([src*='chain-'], [src*='alert-triangle'], [src*='check-circled'], [src*='x-circled'], [src*='mail-badge'], [src$='.png'], .copy-icons img)),
+:where(img[src^='/img/']:not([src*='chain-'], [src*='alert-triangle'], [src*='mail-badge'], [src$='.png'], .copy-icons img)),
 :where(.copy-icons) { filter: var(--icon-filter); }
 * { box-sizing: border-box; }
 /* The page colour sits on <html> too, so overscroll and browser chrome never show a different shade. */
