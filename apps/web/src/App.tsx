@@ -372,6 +372,12 @@ function Main() {
     void refresh();
   }, [refresh]);
 
+  // Signed out: forget the page (#settings etc.) so signing up or in always lands on Home. Signing out from Settings
+  // left #settings in the address and the next sign-in opened Settings (Gold, 13 Nov). A reload while signed in keeps it.
+  useEffect(() => {
+    if (me === null && location.hash) history.replaceState(null, '', location.pathname + location.search);
+  }, [me]);
+
   const onOutcome = async (o: WalletOutcome) => {
     setNote(outcomeNote(o));
     await refresh();

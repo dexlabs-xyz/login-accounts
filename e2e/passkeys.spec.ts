@@ -114,7 +114,8 @@ test('returning user signs in from the email field autofill (D2)', async ({ page
   // Turn autofill on for this tab: the passkey is offered in the email field.
   await page.evaluate(() => sessionStorage.setItem('e2e-autofill', 'on'));
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible(); // the page you were on, kept through sign-out
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible(); // sign-in always lands on Home (Gold, 13 Nov)
+  await goTo(page, 'Settings');
   await expect(page.getByText('Unlocked', { exact: true })).toBeVisible();
   expect(await walletCheck(page)).toBe(before);
 });
