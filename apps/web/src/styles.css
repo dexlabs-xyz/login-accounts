@@ -1,34 +1,98 @@
+/* Geist (SIL Open Font License, public/fonts/Geist-LICENSE.txt), served by the app itself: no third-party font requests. */
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Medium.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+
+/* Colours from Gold's Figma (dark). The light set below is a draft from Gold's page colour #FAFAFA (13 Nov). */
 :root {
-  --bg: #fafaf9;
-  --fg: #1c1917;
-  --muted: #78716c;
-  --line: #e7e5e4;
-  --card: #ffffff;
-  --accent: #1d4ed8;
-  --ok: #15803d;
+  --bg: #080808;
+  --fg: #ffffff;
+  --fg-rgb: 255, 255, 255; /* for see-through text and lines: rgba(var(--fg-rgb), 0.5) */
+  --sidebar: #101010;
+  --hover: #1f1f1f;
+  --panel: #0b0b0b;
+  --tooltip: #1b1b1b;
+  --backdrop: rgba(8, 8, 8, 0.28);
+  --shimmer-mid: #cbcbcb;
+  --ok-bright: var(--ok-bright);
+  --ok-text: #16a34a;
+  --orange: #f97316;
+  --warn-box: #431407;
+  --warn-text: #fdba74;
+  --danger: #dc2626;
+  --danger-box: #450a0a;
+  --danger-text: #f87171;
+  --icon-filter: none; /* the white icon files turn black in light mode */
+  --on-accent: #000; /* text on the blue buttons: black in dark mode, white in light (Gold, 13 Nov) */
+  --on-accent-icon: brightness(0);
+  /* Loading skeletons (skullet): bars on the card colour, a soft shimmer. */
+  --skullet-base: rgb(255 255 255 / 0.08);
+  --skullet-highlight: rgb(255 255 255 / 0.1);
+  --muted: #a3a3a3;
+  --line: #262626;
+  --card: #171717;
+  --accent: #2563eb;
+  --ok: #22c55e;
+  --warn-bg: #2a1a0a;
+  --warn-line: #9a3412;
+  --error: #f87171;
+  --error-line: #dc2626;
+  --radius: 12px;
+  color-scheme: dark;
+  font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Light (draft): neutral greys around Gold's #FAFAFA, the same accent, darker greens and oranges so they read on white. */
+:root[data-theme='light'] {
+  --bg: #fafafa;
+  --fg: #0a0a0a;
+  --fg-rgb: 10, 10, 10;
+  --muted: #737373;
+  --line: #e5e5e5;
+  --card: #efefef;
+  --sidebar: #f4f4f4;
+  --hover: #e5e5e5;
+  --panel: #fafafa;
+  --tooltip: #ffffff;
+  --backdrop: rgba(250, 250, 250, 0.4);
+  --shimmer-mid: #737373;
+  --ok: #16a34a;
+  --ok-bright: #16a34a;
+  --ok-text: #15803d;
+  --orange: #c2410c;
   --warn-bg: #fff7ed;
   --warn-line: #fdba74;
-  --error: #b91c1c;
+  --warn-box: #ffedd5;
+  --warn-text: #9a3412;
+  --error: #dc2626;
+  --danger-box: #fee2e2;
+  --danger-text: #b91c1c;
+  --icon-filter: invert(1);
+  --on-accent: #fff;
+  --on-accent-icon: brightness(0) invert(1);
+  --skullet-base: rgb(0 0 0 / 0.07);
+  --skullet-highlight: rgb(255 255 255 / 0.6);
   color-scheme: light;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0c0a09;
-    --fg: #f5f5f4;
-    --muted: #a8a29e;
-    --line: #292524;
-    --card: #1c1917;
-    --accent: #60a5fa;
-    --ok: #4ade80;
-    --warn-bg: #2a1a0a;
-    --warn-line: #9a3412;
-    --error: #f87171;
-    color-scheme: dark;
-  }
-}
+/* The app's own one-colour icons are white files: flipped to black in light mode. Coloured ones (chain logos, the
+   orange warning, green/red status, the blue mail badge) and photos stay as they are. :where() keeps this weaker than
+   any icon's own rule (e.g. the black plus on the blue button). The copy button's icons are animated with a blur
+   filter of their own, so their box is flipped instead. */
+:where(img[src^='/img/']:not([src*='chain-'], [src*='alert-triangle'], [src*='check-circled'], [src*='x-circled'], [src*='mail-badge'], [src$='.png'], .copy-icons img)),
+:where(.copy-icons) { filter: var(--icon-filter); }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); }
+/* The page colour sits on <html> too, so overscroll and browser chrome never show a different shade. */
+html { background: var(--bg); overscroll-behavior-y: none; height: 100%; }
+/* Always keep room for the scrollbar, so pages that scroll (Settings) and pages that don't (Home) are centred the same
+   and switching between them never shifts the layout sideways. */
+html { scrollbar-gutter: stable; }
+/* The page is sized by its own boxes (html → body → #root), not by a viewport unit that some
+   browsers (Brave) recalculate mid-animation: it fills the window and grows with its content. */
+body { min-height: 100%; display: flex; flex-direction: column; }
+#root { flex: 1 0 auto; display: flex; flex-direction: column; }
+body { margin: 0; color: var(--fg); }
+/* One full-window background layer, drawn in a single piece. Brave painted the plain page background in
+   bands of two slightly different shades (#0A0A0A over #0C0C0C in Gold's screenshot, 11 Nov). */
+body::before { content: ''; position: fixed; inset: 0; z-index: -1; background: var(--bg); will-change: transform; pointer-events: none; }
 .shell { max-width: 30rem; margin: 0 auto; padding: 2rem 1rem 3rem; display: grid; gap: 1rem; }
 .brand { font-weight: 700; letter-spacing: -0.02em; font-size: 1.25rem; }
 h1 { font-size: 1.6rem; margin: 0.5rem 0 0; letter-spacing: -0.02em; }
@@ -44,7 +108,6 @@ button:disabled { opacity: 0.5; cursor: progress; }
 button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
 button.link { border: none; background: none; padding: 0.25rem 0; color: var(--accent); }
 button.danger { color: var(--error); }
-.or { text-align: center; color: var(--muted); font-size: 0.85rem; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 0.9rem; padding: 1rem; display: grid; gap: 0.75rem; }
 .warning { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 0.9rem; padding: 1rem; line-height: 1.5; }
 .badge { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 99px; border: 1px solid var(--line); margin-right: 0.35rem; }
@@ -63,3 +126,565 @@ code { font-family: ui-monospace, monospace; }
 select { font: inherit; padding: 0.7rem 0.8rem; border-radius: 0.6rem; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
 h3 { margin: 0.5rem 0 0; }
 .dev-detail { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; font-size: 0.8rem; background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 0.5rem; padding: 0.6rem; }
+
+/* ---------- Welcome: sign up / sign in ---------- */
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* Content centred in the window both ways; equal top and bottom padding leave room for the back link and the footer. */
+.welcome { flex: 1 0 auto; display: grid; place-items: center; padding: 88px 16px; }
+/* Top-anchored (not centred) so hints and messages appearing below push down instead of shifting the logo. */
+.welcome-body { position: relative; width: min(542px, 100%); align-self: center; display: grid; gap: 20px; justify-items: center; }
+.welcome-title { display: grid; gap: 8px; text-align: center; margin-bottom: 12px; }
+.welcome-title h1 { margin: 0; font-size: clamp(30px, 6vw, 36px); line-height: 40px; font-weight: 500; letter-spacing: normal; }
+.welcome-title p { font-size: 18px; line-height: 25px; font-weight: 400; opacity: 0.7; }
+.welcome-form { width: 100%; display: grid; gap: 20px; }
+.welcome-fields { display: grid; gap: 20px; }
+.welcome-foot { position: absolute; left: 16px; right: 16px; bottom: 24px; display: grid; justify-items: center; text-align: center; }
+.welcome-messages { position: absolute; top: calc(100% + 20px); left: 0; right: 0; display: grid; gap: 12px; justify-items: center; }
+.welcome-messages:empty { display: none; }
+.welcome-foot a { color: var(--fg); opacity: 0.4; font-size: 19.69px; line-height: 34px; text-underline-position: from-font; }
+.welcome-foot a:hover { opacity: 0.7; }
+.welcome .info, .welcome .error, .welcome > .welcome-body > .muted { width: 100%; }
+
+.field { position: relative; display: block; border-radius: var(--radius); background: var(--card); }
+.field input {
+  width: 100%; height: 54px; padding: 0 52px 0 19px; border-radius: var(--radius);
+  border: 1px solid transparent; background: transparent; color: var(--fg);
+  font-size: 20px; font-weight: 400; line-height: 28px; transition: border-color 0.2s ease;
+}
+.field input::placeholder { color: var(--fg); opacity: 0.4; }
+.field input:focus { outline: none; border-color: var(--accent); }
+.field[data-check='invalid'] input { border-color: var(--error-line); }
+.field-icon { position: absolute; right: 15px; top: 50%; width: 24px; height: 24px; margin-top: -12px; pointer-events: none; }
+.field-clear { padding: 0; border: none; background: none; border-radius: 50%; pointer-events: auto; cursor: pointer; transition: opacity 0.15s ease; }
+.field-clear img { display: block; }
+.field-clear:hover { opacity: 0.85; }
+
+/* Valid email: a green sheen passes across the text once. */
+.field input.shimmer {
+  background-image: linear-gradient(90deg, var(--fg) 0%, var(--fg) 35%, var(--ok) 50%, var(--shimmer-mid) 65%, var(--fg) 80%, var(--fg) 100%);
+  background-size: 300% 100%; background-position: 100% 0;
+  -webkit-background-clip: text; background-clip: text; color: transparent; caret-color: var(--fg);
+  animation: shimmer 1.35s ease-out 1 forwards;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
+
+/* Spinners turn inside their own SVG (loader-spinning.svg) instead of a CSS rotation: Brave re-drew the lower page
+   in a slightly different shade while a CSS-rotated spinner ran (Gold's screen recording, 11 Nov). */
+.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.pop { animation: pop 0.25s ease-out; }
+.shake { animation: shake 0.6s cubic-bezier(0.36, 0.07, 0.19, 0.97) 1; }
+@keyframes shake {
+  20%, 80% { transform: translateX(-1px); }
+  30%, 70% { transform: translateX(2px); }
+  40%, 60% { transform: translateX(-3px); }
+  50% { transform: translateX(3px); }
+}
+@keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* Primary call to action. Dimmed (60%) until it can be used. */
+.cta {
+  position: relative; justify-self: center; width: 100%; height: 54px; border-radius: var(--radius);
+  border: none; background: var(--accent); color: var(--on-accent); font-size: 20px; font-weight: 500; line-height: 28px;
+  overflow: hidden; transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1), border-radius 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+}
+.cta:disabled { opacity: 0.6; cursor: not-allowed; }
+/* Busy: full strength, and the button collapses into a 54px circle around the spinner (Figma 369:13956). */
+.cta.is-loading { opacity: 1; cursor: progress; width: 54px; border-radius: 27px; }
+/* "Continue" and the spinner sit in the same spot; useFaceSwap animates between them. */
+.cta { padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); place-items: center; }
+.cta-face { grid-area: 1 / 1; white-space: nowrap; display: flex; align-items: center; justify-content: center; }
+.cta-face.is-out { opacity: 0; }
+.cta-face img { display: block; width: 39px; height: 39px; filter: var(--on-accent-icon); }
+
+.or { height: 20px; display: flex; align-items: center; gap: 20px; }
+.or::before, .or::after { content: ''; flex: 1; border-top: 0.5px solid rgba(var(--fg-rgb), 0.24); }
+.or span { font-size: 13.95px; line-height: 20px; opacity: 0.8; }
+.welcome-form .or { color: var(--fg); text-align: center; }
+
+.passkey-btn {
+  width: 100%; height: 54px; display: flex; align-items: center; justify-content: center; gap: 9px;
+  border: none; border-radius: var(--radius); background: var(--card); color: var(--fg);
+  font-size: 20px; font-weight: 500; line-height: 28px; transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+.passkey-btn:hover:not(:disabled) { background: var(--hover); }
+.passkey-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.cta:hover:not(:disabled) { background: #1d4ed8; }
+
+.cta:focus-visible, .passkey-btn:focus-visible, .welcome-foot a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .field input, .cta, .passkey-btn { font-size: 17px; }
+  .welcome-title p { font-size: 16px; }
+  .welcome-foot a { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field input.shimmer { animation: none; color: var(--fg); background-image: none; }
+  .pop, .shake { animation: none; }
+  .cta, .field input { transition: none; }
+  .spin { animation-duration: 2s; }
+}
+
+/* ---------- Code entry (Figma 44:49 / 369:13781 / 48:2 / 48:49) ---------- */
+@font-face { font-family: 'Geist Mono'; src: url('/fonts/GeistMono-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+
+/* Each step fades up into place. */
+.welcome-body { animation: step-in 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes step-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.welcome-badge { width: 67px; height: 67px; margin-bottom: 4px; }
+.welcome-title p { overflow-wrap: anywhere; }
+
+.welcome-back {
+  position: absolute; left: 43px; top: 31px; display: flex; align-items: center; gap: 2px;
+  padding: 4px 6px 4px 0; border: none; background: none; color: var(--fg); opacity: 0.8;
+  font-size: 18px; font-weight: 500; line-height: 25px; border-radius: 8px; transition: opacity 0.15s ease;
+}
+.welcome-back:hover { opacity: 1; }
+.welcome { position: relative; }
+
+.otp-form { display: grid; justify-items: center; gap: 30px; width: 100%; }
+.otp { position: relative; width: 358px; max-width: 100%; }
+/* The real field sits invisibly on top of the boxes: clicks, typing, paste and autofill go to it. */
+.otp-input {
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; z-index: 1;
+  font-size: 16px; padding: 0; border: none; cursor: text;
+}
+.otp-boxes { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.otp-box {
+  height: 54px; border-radius: var(--radius); background: var(--card); border: 1px solid transparent;
+  display: grid; place-items: center; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 17.45px; line-height: 25px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.otp-box.is-active { border-color: var(--accent); }
+.otp[data-state='valid'] .otp-box { box-shadow: 0 0 0.846px 0.423px var(--ok-bright); }
+.otp[data-state='wrong'] .otp-box { border-color: #991b1b; }
+.otp-digit { animation: pop 0.2s ease-out; }
+.otp-caret { width: 1px; height: 25px; background: rgba(var(--fg-rgb), 0.85); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.otp-after { min-height: 28px; display: grid; place-items: center; }
+.otp-resend { border: none; background: none; padding: 2px 6px; color: var(--fg); opacity: 0.9; font-size: 18px; line-height: 25px; border-radius: 8px; }
+.otp-resend:hover { opacity: 1; text-decoration: underline; text-underline-position: from-font; }
+.otp-spinner { width: 28px; height: 28px; }
+
+@media (max-width: 480px) {
+  .welcome-back { left: 16px; top: 16px; font-size: 16px; }
+  .otp-resend { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .welcome-body, .otp-digit { animation: none; }
+  .otp-caret { animation: none; }
+}
+
+/* ---------- Signed in: frame (Figma: Login.com/Home) ---------- */
+@font-face { font-family: 'Geist Pixel'; src: url('/fonts/GeistPixel-Square.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Geist Mono'; src: url('/fonts/GeistMono-Medium.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+
+/* Figma 546:8475 / 549:8784: sidebar (234) · 33 · divider · 33 · content (937), centred left to right, at Figma's
+   exact pixel sizes (no scaling, Gold 12 Nov). Spare width becomes equal margins. */
+.app {
+  flex: 1 0 auto; display: grid; grid-template-columns: 234px 0 minmax(0, 937px); column-gap: 33px;
+  justify-content: center; padding: 0 16px;
+  min-height: 100dvh;
+}
+.sidebar {
+  position: sticky; top: 0; height: 100dvh; min-height: 560px; display: flex; flex-direction: column;
+  justify-content: space-between; padding: 34.3px 0;
+}
+.sidebar-top { display: grid; gap: 55px; }
+/* The full-height divider (Figma: 0.2px white at 50%). */
+/* Browsers draw a 0.2px line as a full pixel, so the faintness comes from the colour instead (measured on the Figma render: #282828 on #080808). */
+.app-divider { width: 0; margin-left: -1px; border-left: 1px solid rgba(var(--fg-rgb), 0.13); position: sticky; top: 0; height: 100dvh; }
+.brand-mark { font-family: 'Geist Pixel', 'Geist Mono', monospace; font-size: 24px; line-height: 26px; color: var(--fg); }
+.brand-mark span { color: var(--accent); }
+.brand-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Quiet, like the Sandbox tag but grey: 10px Medium on white at 8%, text at 60%. */
+.tag-testnet { flex: none; font-size: 10px; font-weight: 500; line-height: 14px; padding: 1px 6px; border-radius: 3px; color: rgba(var(--fg-rgb), 0.6); background: rgba(var(--fg-rgb), 0.08); cursor: default; }
+.side-nav { display: grid; gap: 30px; }
+.side-nav a, .tab-nav a { display: flex; align-items: center; gap: 10px; color: var(--fg); text-decoration: none; font-size: 20px; font-weight: 400; line-height: 20px; opacity: 0.6; transition: opacity 0.15s ease; border-radius: 8px; }
+.side-nav a:hover, .tab-nav a:hover { opacity: 0.85; }
+.side-nav a.is-current, .tab-nav a.is-current { opacity: 1; font-weight: 500; } /* Regular by default, Medium when current (Gold, 12 Nov) */
+.side-nav a:focus-visible, .tab-nav a:focus-visible, .icon-btn:focus-visible, .hero-btn:focus-visible, .panel-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.side-account { display: flex; align-items: center; gap: 8px; }
+.side-avatar { width: 39.43px; height: 39.43px; border-radius: 50%; flex: none; }
+.side-who { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.side-email { font-size: 16px; line-height: 19.447px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-balance { display: flex; align-items: center; gap: 4px; font-size: 16px; line-height: 19.447px; }
+.side-balance .icon-btn { padding: 0; }
+.side-balance > span { opacity: 0.6; }
+.side-amount { opacity: 0.6; }
+/* Stand-alone icons (copy, eye, ∞, step arrows): no frame behind them; hovering brings them to full opacity (Gold, 12 Nov).
+   Keyboard focus still shows an outline, for people who navigate without a mouse. */
+.icon-btn { display: inline-grid; place-items: center; padding: 2px; border: none; background: none; border-radius: 6px; cursor: pointer; opacity: 0.7; transition: opacity 0.15s ease; }
+.icon-btn:hover:not(:disabled) { opacity: 1; }
+.icon-btn:disabled { opacity: 0.3; cursor: default; }
+.icon-btn img { display: block; }
+.side-copy { padding: 0; } /* flush with the column's right edge, as in Figma */
+.topbar, .tab-nav { display: none; }
+
+/* Content starts on the same top line as the sidebar (Figma: label at 31.5, brand at 34.3), not centred on its own. */
+.app-main {
+  min-height: 100dvh; padding: 31.5px 0; width: 100%;
+  display: flex; flex-direction: column; justify-content: flex-start; gap: 16px;
+}
+.page-title { font-size: 16px; font-weight: 500; line-height: 24px; margin: 4px 0 6px; letter-spacing: normal; display: flex; align-items: center; gap: 8px; }
+/* Figma 556:9226: the page title 20px Medium, 50px above the card (16 of it is the page's gap). */
+/* 7px down so its baseline lines up with Login(accts) in the sidebar (both measured: 54px); the card moves with it. */
+.page-title.is-section { font-size: 20px; line-height: 19.447px; margin: 7px 0 34px; }
+/* The Notifications page's card: the same row padding and spacing as Home's card, with no header row. */
+.activity:not(.is-card) .activity-list { padding-top: 24px; }
+.tag-sandbox { font-size: 10px; font-weight: 500; line-height: 14px; padding: 1px 6px; border-radius: 3px; color: var(--orange); background: rgba(249, 115, 22, 0.15); }
+
+/* Private balance */
+.hero { display: grid; gap: 5px; justify-items: start; }
+.hero-row { display: flex; align-items: flex-end; gap: 9px; }
+.hero-label { font-size: 12px; font-weight: 400; line-height: 14px; margin: 0; opacity: 0.6; }
+.hero-amount { font-family: 'Geist Mono', ui-monospace, monospace; font-weight: 400; font-size: 36px; line-height: 41px; letter-spacing: -0.01em; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 0 10px; padding-bottom: 6px; }
+.hero-meta:empty { display: none; }
+.hero-status { font-size: 12px; line-height: 14px; color: var(--fg); opacity: 0.6; }
+/* "10% Syncing…" (Figma): a green sheen that keeps passing across while the wallet syncs. */
+.hero-syncing {
+  background-image: linear-gradient(90deg, var(--fg) 0%, var(--fg) 30%, var(--ok-bright) 52%, var(--shimmer-mid) 74%, var(--fg) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: sync-sheen 1.8s linear infinite;
+}
+@keyframes sync-sheen { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+.hero-meta .hero-status + .hero-status::before { content: '·'; margin-right: 10px; }
+.hero-status .link { font-size: 12px; padding: 0; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 9px; } /* + 5px gap = Figma's 14px */
+.hero-btn {
+  height: 34px; display: inline-flex; align-items: center; gap: 5px; padding: 0 18px 0 19px; border: none; border-radius: 6px;
+  background: var(--card); color: var(--fg); font-size: 14px; font-weight: 400; line-height: 19px; transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+.hero-btn:hover:not(:disabled) { background: var(--hover); }
+.hero-btn.is-primary { background: var(--accent); color: var(--on-accent); }
+.hero-btn.is-primary img { filter: var(--on-accent-icon); } /* plus and spinner in the text's colour */
+.hero-btn.is-primary:hover:not(:disabled) { background: #1d4ed8; }
+.hero-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.hero-btn img { display: block; }
+/* Figma's button widths: Test USDT 131, Send 97, Receive 113, Copy address 151 (content centred). */
+.hero-btn { justify-content: center; padding: 0; }
+.hero-actions > .hero-btn:nth-child(1) { width: 131px; }
+.hero-actions > .hero-btn:nth-child(2) { width: 97px; }
+.hero-actions > .hero-btn:nth-child(3) { width: 113px; }
+.hero-actions > .hero-btn:nth-child(4) { width: 151px; }
+/* Copy address: content pinned left so the box can collapse from the right; icons and texts stack in place. */
+.copy-btn { justify-content: flex-start; padding: 0 0 0 20px; transform-origin: left center; overflow: hidden; white-space: nowrap; }
+.copy-icons { display: grid; width: 18px; height: 18px; flex: none; }
+.copy-icons img { grid-area: 1 / 1; display: block; }
+.copy-texts { position: relative; display: inline-block; }
+.copy-texts > .is-out { position: absolute; left: 0; top: 0; }
+
+/* Cards on Home (Balance History, Notifications) */
+.panel { background: var(--card); border-radius: 10px; overflow: hidden; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; padding: 17px 25px 0 18px; }
+.panel-head h2 { font-size: 20px; font-weight: 500; line-height: 20px; margin: 0; }
+.panel-link { border: none; background: none; padding: 2px 4px; color: var(--fg); opacity: 0.6; font-size: 14px; line-height: 19px; border-radius: 6px; }
+.panel-link:hover { opacity: 0.9; }
+.panel-more { margin: 0 25px 16px; }
+.panel-empty { padding: 20px 25px 24px; color: var(--muted); }
+.panel-note { padding: 0 25px 20px; font-size: 12px; line-height: 17px; color: var(--muted); }
+.panel.locked { padding: 28px 25px; display: grid; gap: 14px; justify-items: start; }
+.panel.locked h2 { font-size: 20px; font-weight: 500; margin: 0; }
+.panel.locked .cta { width: auto; padding: 0 28px; font-size: 16px; height: 44px; justify-self: start; }
+
+/* Home's two cards share the height left under the buttons, equally, so the bottom of Notifications always lines
+   up with the bottom of the profile block in the sidebar (34.3 from the window's bottom), whatever the window
+   height (Gold, 12 Nov). Below a minimum they stop shrinking and the page scrolls. */
+.app-main.is-home { height: 100dvh; min-height: 560px; padding-bottom: 34.3px; }
+.chart { position: relative; flex: 1 1 0; min-height: 180px; }
+.chart .panel-head { position: absolute; inset: 0 0 auto 0; padding: 15px 18px 0; }
+.chart-area { position: absolute; left: 0; right: 0; top: 54.51px; bottom: -2px; cursor: crosshair; outline: none; touch-action: pan-y; }
+.chart-area:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.chart-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; } /* bottom -2: the fill's edge falls just outside the card, as in Figma */
+/* Hover: a guide line and a dot that follow the pointer along the curve, with a tooltip above the dot. */
+.chart-hover { position: absolute; top: 0; bottom: 0; left: 0; width: 0; pointer-events: none; }
+.chart-guide { position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: rgba(var(--fg-rgb), 0.14); }
+.chart-dot { position: absolute; left: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--fg); border: 2px solid var(--card); transform: translate(-50%, -50%); box-sizing: content-box; margin-left: 0.5px; }
+.chart-tip {
+  position: absolute; left: 0; transform: translate(var(--tip-x, -50%), calc(-100% - 14px)); white-space: nowrap;
+  padding: 4px 8px; border-radius: 6px; background: var(--tooltip); border: 0.5px solid rgba(var(--fg-rgb), 0.16);
+  font-size: 12px; line-height: 16px; color: rgba(var(--fg-rgb), 0.75); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.activity .panel-head { padding: 17px 19px 0 25px; }
+.activity.is-card { flex: 1 1 0; min-height: 180px; position: relative; }
+.activity-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 1px; text-align: center; padding: 0 24px; }
+.activity-empty strong { font-size: 16px; font-weight: 500; line-height: 19px; }
+.activity-empty span { font-size: 12px; opacity: 0.6; max-width: 322px; } /* breaks before "apps", as in Figma */
+.activity-list { list-style: none; margin: 0; padding: 42px 14px 19px 25px; display: grid; gap: 33px; }
+.activity-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; min-height: 35px; }
+.activity-icon { width: 33.43px; height: 33.43px; border-radius: 50%; background: var(--bg); display: grid; place-items: center; }
+.activity-main { display: grid; gap: 1px; min-width: 0; }
+.activity-what { font-size: 16px; line-height: 19px; overflow-wrap: anywhere; }
+.activity-when { font-size: 12px; line-height: 16px; color: var(--fg); opacity: 0.6; }
+.activity-when a { color: inherit; }
+.activity-side { display: grid; gap: 1px; justify-items: end; text-align: right; }
+.activity-amount { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 16px; line-height: 19px; white-space: nowrap; }
+.activity-status { font-size: 12px; line-height: 16px; color: var(--muted); }
+.activity-status.is-spendable, .activity-status.is-done { color: var(--ok-bright); }
+.activity-status.is-blocked { color: var(--error); }
+.activity-status.is-checking { color: var(--fg); opacity: 0.6; }
+/* Resume / Finish on an unfinished deposit (same look as the pop-up buttons). */
+.activity-action { height: 28px; padding: 0 12px; border: none; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-size: 13px; line-height: 18px; }
+.activity-action:hover { background: #1d4ed8; }
+
+/* Settings and Verification pages reuse the older cards until they're redesigned. */
+.app-main > .link { justify-self: start; }
+/* Verification and Settings follow the Notifications page (Gold, 12 Nov): full-width #171717 cards, radius 10, the same
+   inner padding as Notifications' card (24 top, 25 left, 14 right, 19 bottom), 16 between cards, 20px Medium card titles. */
+.app-main > .card { background: var(--card); border: none; border-radius: 10px; padding: 24px 14px 19px 25px; gap: 14px; }
+.app-main > .card > h2 { font-size: 20px; font-weight: 500; line-height: 19.447px; margin: 0 0 6px; }
+.app-main > .warning { border: none; border-radius: 10px; padding: 16px 14px 16px 25px; background: var(--warn-box); color: var(--warn-text); }
+/* The Verification page's title already says "Verification": the KYC card's own heading stays for screen readers only. */
+.app-main > .card > #kyc-h { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
+.tag-status { font-size: 10px; font-weight: 500; line-height: 14px; padding: 1px 6px; border-radius: 3px; color: var(--fg); background: rgba(var(--fg-rgb), 0.1); }
+.tag-status.is-ok { color: var(--ok-bright); background: rgba(73, 230, 59, 0.12); }
+
+/* ---------- Pop-ups ---------- */
+/* A layer of its own (not the browser's top layer), under the toasts so pop-up toasts show over the blur. */
+.modal-layer { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; }
+.modal-layer.is-closed { visibility: hidden; pointer-events: none; }
+/* Half as strong as before (Gold, 12 Nov): blur 4px (Figma's value), a light dim. */
+.modal-backdrop { position: absolute; inset: 0; background: var(--backdrop); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.modal-layer.is-open .modal-backdrop { animation: fade-in 0.22s ease; }
+.modal { position: relative; color: var(--fg); max-width: 100%; max-height: calc(100dvh - 32px); outline: none; }
+.modal-layer.is-open .modal { animation: modal-in 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.modal-panel { width: 403px; max-width: 100%; max-height: calc(100dvh - 32px); overflow: auto; background: var(--panel); border: 0.5px solid rgba(var(--fg-rgb), 0.2); border-radius: 16px; padding: 18px 20px 20px; display: grid; gap: 14px; }
+.modal-wide .modal-panel { width: 560px; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; }
+.modal-head h2 { margin: 0; font-size: 20px; font-weight: 500; }
+.modal-close { border: none; background: none; color: var(--fg); opacity: 0.7; font-size: 24px; line-height: 1; padding: 0 4px; border-radius: 6px; }
+.modal-close:hover { opacity: 1; }
+
+/* ---------- Toasts (Sonner) ---------- */
+/* Sonner's dark theme, set to our card colour, hairline border and Geist. */
+:root [data-sonner-toaster][data-sonner-theme] { --normal-bg: var(--card); --normal-border: rgba(var(--fg-rgb), 0.18); --normal-text: var(--fg); --border-radius: 12px; font-family: inherit; }
+[data-sonner-toast].login-toast { font-size: 14px; line-height: 20px; }
+[data-sonner-toast].login-toast [data-title] { font-weight: 500; }
+[data-sonner-toaster][data-sonner-theme] [data-sonner-toast].login-toast [data-description] { color: rgba(var(--fg-rgb), 0.6); font-size: 13px; line-height: 18px; }
+/* Sonner's own icons in the text colour: white in dark mode, black in light mode once it lands (Gold, 12 Nov).
+   They draw in currentColor, so following --fg is enough. */
+[data-sonner-toast] [data-icon] { color: var(--fg); }
+[data-sonner-toast] .sonner-loading-bar { background: var(--fg); }
+/* Toasts with buttons (Retry sync, Remove it / Keep for signing in): the text takes the full width and the buttons sit
+   on a line of their own under it, right-aligned, in the Settings button style. */
+[data-sonner-toast].login-toast:has([data-button]) { flex-wrap: wrap; row-gap: 12px; align-items: flex-start; }
+[data-sonner-toast].login-toast:has([data-button]) [data-content] { flex: 1 1 calc(100% - 32px); }
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-button] {
+  height: 28px; padding: 0 14px; border-radius: 5.75px; font-size: 13.417px; font-weight: 400; line-height: 18.636px;
+  border: 0.2px solid rgba(var(--fg-rgb), 0.5); background: none; color: var(--fg); cursor: pointer;
+}
+[data-sonner-toaster][data-sonner-theme] [data-sonner-toast].login-toast [data-cancel] { background: none; color: var(--fg); }
+[data-sonner-toaster][data-sonner-theme] [data-sonner-toast].login-toast [data-cancel]:hover { background: rgba(var(--fg-rgb), 0.06); }
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-action] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-action]:hover { background: rgba(var(--fg-rgb), 0.85); }
+/* The first button pushes the pair to the right; 6px between them, as in Settings. */
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-button] { margin-left: 6px; }
+[data-sonner-toaster] [data-sonner-toast].login-toast [data-content] + [data-button] { margin-left: auto; }
+
+/* ---------- Phones: top bar + bottom tabs instead of the sidebar ---------- */
+@media (max-width: 820px) {
+  .app { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 16px 84px; min-height: 0; }
+  .sidebar, .app-divider { display: none; }
+  .app-main { min-height: 0; justify-content: flex-start; padding: 8px 0 24px; }
+  .activity.is-card { flex: none; height: auto; min-height: 240px; }
+  .chart { flex: none; height: 212px; }
+  .app-main.is-home { height: auto; min-height: 0; padding-bottom: 24px; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0 6px; position: sticky; top: 0; z-index: 5; background: var(--bg); }
+  .topbar .brand-mark { font-size: 20px; }
+  .topbar .brand-row { flex: none; }
+  .topbar .side-account { margin: 0; flex: 0 1 auto; min-width: 0; } /* gives way to the logo and its Testnet tag */
+  .topbar .side-avatar { width: 30px; height: 30px; }
+  .topbar .side-email { font-size: 13px; }
+  .topbar .side-balance { font-size: 13px; }
+  .tab-nav {
+    display: grid; grid-template-columns: repeat(4, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    background: var(--sidebar); border-top: 0.5px solid rgba(var(--fg-rgb), 0.2); padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+  }
+  .tab-nav a { flex-direction: column; gap: 4px; font-size: 11px; line-height: 13px; padding: 4px 0; justify-content: center; }
+  .tab-nav img { width: 22px; height: 22px; }
+  .hero-amount { font-size: 30px; line-height: 38px; }
+  /* Phones: the four buttons as an even 2×2 grid instead of Figma's fixed desktop widths. */
+  .hero-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .hero-actions > .hero-btn:nth-child(n) { width: auto; }
+  .activity-list, .activity .panel-head { padding-left: 16px; padding-right: 16px; }
+  .panel-note, .panel-empty { padding-left: 16px; padding-right: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-main, .modal-layer.is-open .modal, .modal-layer.is-open .modal-backdrop, .hero-syncing { animation: none; }
+}
+
+/* ---------- Pop-up sheets (Figma: Receive 433:5445 / 433:5643 / 444:6036 / 444:6213) ---------- */
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-SemiBold.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+.modal-panel:has(> .sheet) { width: 403px; padding: 19.8px; border-radius: 20px; background: var(--bg); border: 1px solid rgba(var(--fg-rgb), 0.13); gap: 0; }
+/* Columns may shrink below their content: the full address (one unbroken line) otherwise pushed the pop-up
+   13px wider than its box, which showed a horizontal scrollbar over the bottom corners (Gold, 12 Nov). */
+.sheet, .sheet-body, .sheet-group { grid-template-columns: minmax(0, 1fr); }
+.sheet { display: grid; }
+.sheet-step { overflow: hidden; margin: 0 -3px; } /* clips the step while its height animates */
+/* What gets measured: flow-root keeps the subtitle's top margin inside the measurement (it was escaping and cutting
+   ~20px off the bottom), and the 3px keep field outlines visible inside the clip. */
+.sheet-step > div { display: flow-root; padding: 0 3px 3px; }
+.modal-panel { overflow-x: hidden; }
+/* Figma's text boxes: title 15 tall, subtitle and labels 12 tall (the text overflows them slightly, as in Figma). */
+.sheet-head { display: flex; align-items: center; justify-content: space-between; height: 15px; }
+.sheet-head h2 { margin: 0; font-size: 20px; font-weight: 600; line-height: 15px; }
+.sheet-steps { display: flex; gap: 0; }
+.sheet-steps .icon-btn { padding: 2px; }
+.sheet-steps .icon-btn:disabled { opacity: 0.35; }
+/* The < > step arrows keep a box on hover (Gold, 12 Nov); other icons don't. */
+.sheet-steps .icon-btn:hover:not(:disabled) { background: rgba(var(--fg-rgb), 0.06); }
+.sheet-sub { margin-top: 20px; font-size: 16px; line-height: 12px; opacity: 0.7; }
+.sheet-list { display: grid; gap: 14px; margin-top: 31px; }
+.sheet-row {
+  height: 35px; display: flex; align-items: center; gap: 7px; padding: 0 13.7px; border: none; border-radius: 7.88px;
+  background: var(--card); color: var(--fg); font-size: 13.133px; line-height: 18.467px; text-align: left; transition: background-color 0.15s ease;
+}
+.sheet-row:hover:not(:disabled) { background: var(--hover); }
+.sheet-row:disabled { cursor: progress; }
+.sheet-row > span { flex: 1; }
+.sheet-row img { display: block; }
+.sheet-body { display: grid; gap: 18px; margin-top: 28px; }
+.sheet-body.is-form { gap: 25px; margin-top: 31px; }
+.sheet-qr { height: 247px; border-radius: 7.88px; background: var(--card); display: grid; place-items: center; margin-bottom: 10px; }
+.qr { display: block; color: var(--fg); }
+.sheet-group { display: grid; gap: 18px; font-weight: 400; } /* not the old label weight: field text is Regular (Gold) */
+.sheet-label { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 400; line-height: 12px; height: 12px; opacity: 0.6; margin: 0; }
+.sheet-label img { opacity: 1; cursor: help; }
+.sheet-field {
+  position: relative; height: 35px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 7.88px; background: var(--card);
+  font-size: 13.133px; line-height: 18.467px;
+}
+.sheet-field code { font-family: inherit; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-field input, .sheet-field select {
+  flex: 1; min-width: 0; height: 100%; padding: 0; border: none; background: transparent; color: var(--fg);
+  font: inherit; font-size: 13.133px; outline: none; appearance: none; -webkit-appearance: none;
+}
+.sheet-field input::placeholder { color: var(--fg); opacity: 0.6; }
+/* Only typing fields light up blue, not a field whose copy icon was just pressed. */
+.sheet-field:has(input:focus, select:focus) { box-shadow: 0 0 0 1px var(--accent); }
+.sheet-field.is-error, .sheet-field.is-error:has(input:focus, select:focus) { box-shadow: 0 0 0 1px var(--danger); } /* refused value: red outline (Gold) */
+.sheet-field.is-select img { pointer-events: none; }
+.sheet-field select option { background: var(--card); }
+.sheet-copy { padding: 0; flex: none; }
+.sheet-warning { display: flex; align-items: center; gap: 5.5px; min-height: 62px; padding: 10px 14px 10px 10.5px; border-radius: 7.88px; background: var(--warn-box); }
+.sheet-warning img { flex: none; display: block; }
+.sheet-warning p { font-size: 10px; line-height: 14px; color: var(--orange); }
+.sheet-note { font-size: 12px; line-height: 17px; opacity: 0.6; }
+.sheet-status { font-size: 12px; line-height: 17px; color: var(--fg); }
+.sheet-status.is-warn { color: var(--orange); }
+.sheet-status.is-error { color: var(--error); }
+.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 17px; }
+.sheet-btn {
+  height: 35px; border: none; border-radius: 7.88px; background: var(--card); color: var(--fg);
+  font-size: 13.133px; font-weight: 500; line-height: 18.467px; padding: 0 12px; transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+.sheet-btn:hover:not(:disabled) { background: var(--hover); }
+.sheet-btn.is-primary { background: var(--accent); color: var(--on-accent); }
+.sheet-btn.is-primary:hover:not(:disabled) { background: #1d4ed8; }
+.sheet-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.sheet-summary { display: grid; gap: 4px; margin: 3px 0 0; } /* + the body's 28 = Figma's 31 under the subtitle */
+.sheet-summary > div { height: 35px; display: flex; align-items: center; justify-content: space-between; padding: 0 11.5px; background: var(--card); font-size: 13.133px; line-height: 18.467px; }
+.sheet-summary > div:first-child { border-radius: 7.88px 7.88px 0 0; }
+.sheet-summary > div:last-child { border-radius: 0 0 7.88px 7.88px; }
+.sheet-summary dt { opacity: 0.7; }
+.sheet-summary dd { margin: 0; display: flex; align-items: center; gap: 5px; text-align: right; }
+.sheet-summary + .sheet-group { margin-top: 10px; }
+@media (max-width: 480px) { .modal-panel:has(> .sheet) { width: calc(100vw - 32px); } }
+
+/* ---------- Send pop-up extras (review, sending, sent) ---------- */
+.sheet-warning.is-danger { background: var(--danger-box); }
+.sheet-warning.is-danger p { color: var(--danger-text); }
+.sheet-warning p strong { font-weight: 600; }
+.sheet-summary dd code { font-family: inherit; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-btn-spinner { display: block; margin: 0 auto; filter: brightness(0); }
+.sheet-progress { justify-items: center; text-align: center; gap: 12px; padding: 12px 0 4px; }
+.sheet-progress p { font-size: 14px; line-height: 20px; max-width: 320px; }
+.sheet-progress .sheet-actions { width: 100%; margin-top: 8px; }
+.sheet-progress a.sheet-note { color: var(--fg); }
+
+/* Settings (Gold's Figma 451:7683, 12 Nov): full width like the other pages (Gold, 12 Nov); groups of 52px rows 3px apart, #171717, the group's outer corners
+   rounded 10; 23px side padding; 16px Regular. A group's heading is 16px Regular at 60% (Gold, 12 Nov), 18 above it.
+   Figma spaces the groups 39 apart (still so on phones). */
+.set-page { display: flex; flex-direction: column; gap: 39px; }
+/* The four groups share the leftover height equally, so About ends level with the bottom of the profile block in the
+   sidebar (34.3 from the window's bottom), as Home's cards do (Gold, 12 Nov). 16px is the least space between groups;
+   in a short window the page scrolls instead. */
+.app-main.is-settings { padding-bottom: 34.3px; }
+.app-main.is-settings .set-page { flex: 1 0 auto; justify-content: space-between; gap: 16px; }
+.set-section { display: grid; gap: 18px; }
+.set-section > h2 { margin: 0; padding-left: 23px; font-size: 16px; font-weight: 400; line-height: 19.447px; opacity: 0.6; }
+.set-group, .set-list { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.set-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-height: 52px; padding: 0 23px; background: var(--card); font-size: 16px; line-height: 19.447px;
+}
+.set-group > :first-child, .set-group > .set-list:first-child > :first-child { border-radius: 10px 10px 0 0; }
+.set-group > :last-child, .set-group > .set-list:last-child > :last-child { border-radius: 0 0 10px 10px; }
+.set-group > :only-child { border-radius: 10px; }
+.set-group > .set-list { border-radius: 0; }
+.set-value { text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-address { display: flex; align-items: center; gap: 5px; }
+.set-address .icon-btn { padding: 0; }
+.set-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.set-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; }
+/* Small buttons (Figma: 28 high, 0.2px white-50% border, radius 5.75, 13.417px text). Remove is 92 wide; Sign out is red. */
+.set-btn {
+  display: inline-grid; place-items: center; height: 28px; padding: 0 14px; border: 0.2px solid rgba(var(--fg-rgb), 0.5);
+  border-radius: 5.75px; background: none; color: var(--fg); font-size: 13.417px; line-height: 18.636px; text-decoration: none;
+  white-space: nowrap; cursor: pointer; transition: background 0.15s ease;
+}
+.set-btn:hover:not(:disabled) { background: rgba(var(--fg-rgb), 0.06); }
+.set-btn:disabled { opacity: 0.4; cursor: default; }
+.set-btn.is-wide { width: 92px; padding: 0; }
+.set-btn.is-danger { border: 0.5px solid rgba(220, 38, 38, 0.5); color: var(--danger); }
+.set-btn.is-danger:hover:not(:disabled) { background: rgba(220, 38, 38, 0.1); }
+.set-row .is-danger-text { color: var(--danger); }
+.set-ok { color: var(--ok-text); } /* "Unlocked": green 16px text, no pill (Gold, 12 Nov) */
+@media (max-width: 820px) {
+  .set-row { flex-wrap: wrap; padding: 11px 16px; } .set-value { white-space: normal; text-align: left; }
+  .app-main.is-settings { padding-bottom: 24px; } .app-main.is-settings .set-page { justify-content: flex-start; gap: 39px; }
+}
+
+/* Settings › Theme (Figma 562:9778): sun and moon in a dark capsule; the chosen one sits on a card-coloured pill. */
+.theme-switch {
+  display: flex; align-items: center; justify-content: space-between; width: 56.649px; padding: 3.207px 4.275px;
+  border: 0.214px solid rgba(var(--fg-rgb), 0.2); border-radius: 21.377px; background: var(--bg);
+}
+.theme-switch button {
+  display: grid; place-items: center; padding: 3.207px; border: none; border-radius: 11.223px; background: none;
+  cursor: pointer; opacity: 0.6; transition: background 0.2s ease, opacity 0.2s ease;
+}
+.theme-switch button:hover { opacity: 1; }
+.theme-switch button[aria-checked='true'] { background: var(--card); opacity: 1; }
+.theme-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.theme-switch img { display: block; width: 14.964px; height: 14.964px; }
+
+/* "Your wallet is locked" pop-up (Figma 562:9856 / 562:9903): 371 wide, radius 20, the page colour, a 0.2px line;
+   title 20px SemiBold at 70%, centred; a 261×247 stage with the 180px spinner or check 34 from its top; 28 between;
+   a white 135×35 Unlock button (inverted in light mode), dimmed to 70% while it can't be pressed. */
+.modal-panel:has(> .unlock) { width: 371px; padding: 19.8px 3.8px 23px; border-radius: 20px; background: var(--bg); border: 0.2px solid rgba(var(--fg-rgb), 0.5); gap: 0; }
+.unlock { display: grid; justify-items: center; gap: 28px; }
+.unlock-title { margin: 0; width: 100%; text-align: center; font-size: 20px; font-weight: 600; line-height: 19.447px; opacity: 0.7; }
+.unlock-stage { width: 261px; height: 247px; border-radius: 10px; display: grid; justify-items: center; align-content: start; padding-top: 34px; overflow: hidden; }
+.unlock-stage svg { display: block; overflow: visible; }
+.unlock-spinner { transform-box: view-box; transform-origin: 12px 12px; animation: spin 1s linear infinite; }
+.unlock-btn {
+  /* Not the app's default button padding (11.2px each way, more than the 35px button holds: the text sat 2px low).
+     1.5px on top centres the letters themselves, since Geist keeps room below for g/y/p and "Unlock" has none
+     (measured: 13px above and below at 2× density; 12px above, 14px below with no padding). */
+  display: grid; place-items: center; padding: 1.5px 0 0;
+  width: 135px; height: 35px; border: none; border-radius: 7.88px; background: var(--fg); color: var(--bg);
+  font-size: 13.133px; font-weight: 500; line-height: 18.467px; cursor: pointer; transition: opacity 0.2s ease;
+}
+.unlock-btn:disabled { opacity: 0.7; cursor: default; }
+.unlock-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .unlock-spinner { animation: none; } }

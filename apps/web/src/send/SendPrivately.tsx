@@ -5,6 +5,8 @@
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { privateWallet } from '../railgun/client.ts';
+import { useToast } from '../ui/toast.tsx';
+import { usd } from '../money.ts';
 import { SEPOLIA_USDT, USDT_DECIMALS } from '../railgun/protocol.ts';
 import { CHAIN_NAMES, formatUnits, loadTokens, toUnits, TidepoolError, type OriginChain, type Quote as SwapQuote, type Token } from '../deposits/tidepool.ts';
 import { depositProgress, prepareSwapWithdrawal, saveWithdrawal, trackWithdrawal } from '../deposits/flow.ts';
@@ -132,20 +134,27 @@ type Step =
   | { kind: 'sent'; txHash: string; amount: string; swap?: Swap };
 
 type PanelProps = { confirmWithPasskey: () => Promise<boolean> };
+/** private: to a 0zk address (a private send). evm / sol: out to an Ethereum or Solana address (a withdrawal). */
+export type SendMode = 'private' | 'evm' | 'sol';
+const EVM_CHAINS = new Set(['eth', 'base', 'arb']);
 
-export function SendPrivately(props: PanelProps) {
-  return <SendPanel kind="transfer" {...props} />;
-}
-
-export function Withdraw(props: PanelProps) {
-  return <SendPanel kind="unshield" {...props} />;
-}
-
-function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
+export function SendPanel({
+  mode,
+  confirmWithPasskey,
+  onBack,
+  onDone,
+  onStep,
+}: PanelProps & { mode: SendMode; onBack: () => void; onDone: () => void; onStep: (s: Step['kind']) => void }) {
+  const kind: Kind = mode === 'private' ? 'transfer' : 'unshield';
+  const toast = useToast();
   const pw = useSyncExternalStore(privateWallet.subscribe, privateWallet.get);
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
   const [step, setStep] = useState<Step>({ kind: 'form' });
+  useEffect(() => onStep(step.kind), [step.kind, onStep]);
+  /** Fields the last attempt refused: red outline until edited (errors themselves are toasts: Gold, 12 Nov). */
+  const [amountBad, setAmountBad] = useState(false);
+  const [toBad, setToBad] = useState(false);
   /** Withdrawals: '' = USDT on Ethereum Sepolia, else the Tidepool asset to swap into. */
   const [dest, setDest] = useState('');
   const [destTokens, setDestTokens] = useState<Token[]>([]);
@@ -157,7 +166,12 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
   /** Development builds only: the worker's real error, so testers can copy it without dev tools. */
   const [devDetail, setDevDetail] = useState('');
   const fail = (e: unknown, stage: string) => {
-    setError(explain(e, kind));
+    const msg = explain(e, kind);
+    setError(msg);
+    toast.show({ kind: 'error', text: msg });
+    const m = e instanceof Error ? e.message : '';
+    if (m === 'insufficient-usdt' || /capped/i.test(m)) setAmountBad(true);
+    if (m === 'invalid-address' || m === 'own-deposit-address') setToBad(true);
     const d = import.meta.env.DEV && e instanceof Error ? (e as Error & { devDetail?: string }).devDetail : undefined;
     setDevDetail(d ? `${stage}: ${e instanceof Error ? e.message : ''}\n${d}` : import.meta.env.DEV && e instanceof Error ? `${stage}: ${e.message}` : '');
   };
@@ -170,12 +184,17 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
   const copy = COPY[kind];
   const headingId = `${kind}-h`;
 
+  const choices = destTokens.filter((t) => (mode === 'sol' ? t.blockchain === 'sol' : EVM_CHAINS.has(t.blockchain)));
+  useEffect(() => {
+    if (mode === 'sol' && !dest && choices[0]) setDest(choices[0].assetId);
+  }, [mode, dest, choices]);
+
   if (pw.status !== 'ready') return null;
   const spendableUsdt =
     pw.balances.Spendable?.find((b) => b.tokenAddress.toLowerCase() === SEPOLIA_USDT.toLowerCase())?.amount ?? '0';
   const units = toUnits(amount, USDT_DECIMALS);
   const target = to.trim();
-  const destToken = kind === 'unshield' ? destTokens.find((t) => t.assetId === dest) : undefined;
+  const destToken = kind === 'unshield' ? choices.find((t) => t.assetId === dest) : undefined;
   const toSolana = destToken?.blockchain === 'sol';
   const addressProblem =
     toSolana
@@ -189,7 +208,7 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
           ? 'That’s your own address.'
           : ''
       : ZK_ADDRESS.test(target)
-        ? 'That’s a private address. To send to it, use “Send privately”.'
+        ? 'That’s a private address. To send to it, choose “Privately via Railgun”.'
         : !EVM_ADDRESS.test(target) || ZERO_ADDRESS.test(target)
           ? 'That isn’t a valid 0x address.'
           : '';
@@ -279,149 +298,197 @@ function SendPanel({ kind, confirmWithPasskey }: PanelProps & { kind: Kind }) {
     }
   };
 
-  return (
-    <section className="card" aria-labelledby={headingId}>
-      <h2 id={headingId}>
-        {copy.title} <span className="badge">Testnet</span>
-      </h2>
-      <p className="muted small">
-        {copy.intro} Spendable now: {formatUnits(spendableUsdt, USDT_DECIMALS)} USDT.
-      </p>
+  // ---------- the pop-up's screens (Figma 445:6734 options, 445:6965 private, 446:7312 Ethereum, 446:7449 Solana) ----------
+  const amountWarn = amountBad;
+  const toWarn = (target !== '' && !!addressProblem) || toBad;
+  const fieldFor = (label: string, input: React.ReactNode, bad: boolean, extra?: React.ReactNode) => (
+    <label className="sheet-group">
+      <span className="sheet-label">{label}</span>
+      <span className={`sheet-field${bad ? ' is-error' : ''}`}>
+        {input}
+        {extra}
+      </span>
+    </label>
+  );
+  const setMax = () => setAmount(formatUnits(spendableUsdt, USDT_DECIMALS, 6));
 
+  return (
+    <>
       {(step.kind === 'form' || step.kind === 'quoting') && (
-        <form className="stack" onSubmit={(e) => (e.preventDefault(), void review())}>
-          {kind === 'unshield' && destTokens.length > 0 && (
-            <label>
-              Receive as
-              <select value={dest} onChange={(e) => setDest(e.target.value)} data-testid="withdraw-receive-as">
-                <option value="">USDT on Ethereum Sepolia</option>
-                {destTokens.map((t) => (
-                  <option key={t.assetId} value={t.assetId}>
-                    {t.symbol} on {chainName(t.blockchain)} (swapped through NEAR Intents)
-                  </option>
-                ))}
-              </select>
+        <form className="sheet-body is-form" onSubmit={(e) => (e.preventDefault(), void review())}>
+          {fieldFor(
+            mode === 'private' ? '0zk address' : 'Address',
+            <input
+              value={to}
+              onChange={(e) => (setTo(e.target.value), setToBad(false))}
+              placeholder={mode === 'private' ? '0zk1…' : mode === 'sol' ? 'Solana address' : '0x…'}
+              aria-invalid={toWarn}
+              autoComplete="off"
+              spellCheck={false}
+              required
+            />,
+            toWarn,
+          )}
+          {mode !== 'private' && (
+            <label className="sheet-group">
+              <span className="sheet-label">Select token</span>
+              <span className="sheet-field is-select">
+                <select value={dest} onChange={(e) => setDest(e.target.value)} data-testid="withdraw-receive-as">
+                  {mode === 'evm' && <option value="">USDT on Ethereum Sepolia</option>}
+                  {choices.map((t) => (
+                    <option key={t.assetId} value={t.assetId}>
+                      {t.symbol} on {chainName(t.blockchain)}
+                    </option>
+                  ))}
+                </select>
+                <img src="/img/chevron-down.svg" alt="" width={15} height={15} />
+              </span>
             </label>
           )}
-          <label>
-            {destToken
-              ? `To (your ${toSolana ? 'Solana' : '0x'} address on ${chainName(destToken.blockchain)})`
-              : copy.toLabel}
-            <input value={to} onChange={(e) => setTo(e.target.value)} placeholder={toSolana ? 'Solana address' : copy.placeholder} required />
-            {target && addressProblem && <span className="error small">{addressProblem}</span>}
-          </label>
-          <label>
-            Amount (USDT)
-            <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 1" required />
-          </label>
-          <button type="submit" className="primary" disabled={step.kind === 'quoting' || !units || !toOk}>
-            {step.kind === 'quoting' ? 'Getting the network fee…' : 'Review'}
-          </button>
+          {fieldFor(
+            'Enter amount',
+            <input
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => (setAmount(e.target.value), setAmountBad(false))}
+              placeholder="E.g. $5"
+              aria-invalid={amountWarn}
+              required
+            />,
+            amountWarn,
+            <button type="button" className="icon-btn sheet-copy" onClick={setMax} aria-label={`Use everything spendable (${usd(spendableUsdt, USDT_DECIMALS)})`} title="Use everything spendable">
+              <img src="/img/infinity.svg" alt="" width={15} height={15} />
+            </button>,
+          )}
+          <div className="sheet-actions">
+            <button type="button" className="sheet-btn" onClick={onBack}>
+              Cancel
+            </button>
+            <button type="submit" className="sheet-btn is-primary" disabled={step.kind === 'quoting' || !units || !toOk} aria-busy={step.kind === 'quoting'}>
+              {step.kind === 'quoting' ? <img className="sheet-btn-spinner" src="/img/loader-spinning.svg" alt="Getting the network fee" width={18} height={18} /> : 'Review'}
+            </button>
+          </div>
         </form>
       )}
 
       {step.kind === 'review' && (
-        <div className="stack" aria-label={kind === 'transfer' ? 'Review send' : 'Review withdrawal'}>
-          {kind === 'transfer' ? (
-            <p>
-              Send <strong>{usdt(step.amount)} USDT</strong> to <code className="address">{short(step.to)}</code>
+        <div className="sheet-body" aria-label={kind === 'transfer' ? 'Review send' : 'Review withdrawal'}>
+          <dl className="sheet-summary">
+            <div>
+              <dt>To</dt>
+              <dd>
+                <code className="address" title={step.swap ? step.swap.to : step.to}>
+                  {short(step.swap ? step.swap.to : step.to)}
+                </code>
+              </dd>
+            </div>
+            <div>
+              <dt>{kind === 'transfer' ? 'You send' : 'You withdraw'}</dt>
+              <dd>{usd(step.amount, USDT_DECIMALS, { exact: true })}</dd>
+            </div>
+            {kind === 'unshield' && (
+              <div>
+                <dt>Railgun fee (0.25%)</dt>
+                <dd>{usd(step.railgunFee, USDT_DECIMALS, { exact: true })}</dd>
+              </div>
+            )}
+            {kind === 'unshield' && !step.swap && (
+              <div>
+                <dt>Arrives</dt>
+                <dd data-testid="withdraw-receives">{usdt(step.receives)} USDT</dd>
+              </div>
+            )}
+            {step.swap && (
+              <div>
+                <dt>Arrives</dt>
+                <dd data-testid="withdraw-swap-receives">
+                  about {out(step.swap.quote.amountOut, step.swap.token)} {step.swap.token.symbol} on {chainName(step.swap.token.blockchain)}
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt>Network fee</dt>
+              <dd>{feeInUsdt(step.feeWei, price)}</dd>
+            </div>
+            <div>
+              <dt>Valid until</dt>
+              <dd>{new Date(step.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</dd>
+            </div>
+          </dl>
+          {step.swap && (
+            <p className="sheet-note">
+              Swapped through NEAR Intents (Tidepool’s testnet): at least {out(step.swap.quote.minAmountOut, step.swap.token)}{' '}
+              {step.swap.token.symbol}, or the swap is cancelled and the USDT comes back to your private balance. Tidepool sees the
+              address you’re withdrawing to.
             </p>
-          ) : step.swap ? (
-            <>
-              <p>
-                Withdraw <strong>{usdt(step.amount)} USDT</strong>, arriving as{' '}
-                <strong data-testid="withdraw-swap-receives">
-                  about {out(step.swap.quote.amountOut, step.swap.token)} {step.swap.token.symbol}
-                </strong>{' '}
-                on {chainName(step.swap.token.blockchain)} at <code className="address">{step.swap.to}</code>
-              </p>
-              <p className="small">
-                Railgun’s withdrawal fee: <strong>{usdt(step.railgunFee)} USDT</strong>. The other {usdt(step.receives)} USDT is
-                swapped through NEAR Intents (Tidepool’s testnet). If the rate moves, you get at least{' '}
-                {out(step.swap.quote.minAmountOut, step.swap.token)} {step.swap.token.symbol}, or the swap is cancelled and the
-                USDT comes back to your private balance. Tidepool sees the address you’re withdrawing to.
-              </p>
-              <p className="warning small" role="note">
-                <strong>This part is public.</strong> Anyone can see this amount arriving at this address, but not that it
-                came from you. To keep it that way, use an address that isn’t linked to you, and don’t withdraw the exact
-                amount you just deposited.
-              </p>
-              {step.fundedDeposits && (
-                <p className="error small" role="alert" data-testid="withdraw-linked-warning">
-                  <strong>This address sent money into your Login account.</strong> Anyone can see both on-chain, so this
-                  withdrawal can be tied to you. To keep it private, withdraw to a fresh address instead.
-                </p>
-              )}
-            </>
-          ) : (
-            <>
-              <p>
-                Withdraw <strong>{usdt(step.amount)} USDT</strong> to <code className="address">{step.to}</code>
-              </p>
-              <p className="small">
-                Railgun’s withdrawal fee: <strong>{usdt(step.railgunFee)} USDT</strong>. The address receives{' '}
-                <strong data-testid="withdraw-receives">{usdt(step.receives)} USDT</strong>.
-              </p>
-              <p className="warning small" role="note">
-                <strong>This part is public.</strong> Anyone can see this amount arriving at this address, but not that it
-                came from you. To keep it that way, use an address that isn’t linked to you, and don’t withdraw the exact
-                amount you just deposited.
-              </p>
-              {step.fundedDeposits && (
-                <p className="error small" role="alert" data-testid="withdraw-linked-warning">
-                  <strong>This address sent money into your Login account.</strong> Anyone can see both on-chain, so this
-                  withdrawal can be tied to you. To keep it private, withdraw to a fresh address instead.
-                </p>
-              )}
-            </>
           )}
-          <p className="small">
-            Network fee: <strong>{feeInUsdt(step.feeWei, price)}</strong>, paid to the relay that submits it. Quote valid until{' '}
-            {new Date(step.expiresAt).toLocaleTimeString()}.
-          </p>
-          <div className="row">
-            <button className="primary" onClick={() => void send(step)}>
-              Confirm with passkey
-            </button>
-            <button className="link" onClick={() => setStep({ kind: 'form' })}>
+          {kind === 'unshield' && (
+            <div className="sheet-warning" role="note">
+              <img src="/img/alert-triangle.svg" alt="" width={15} height={15} />
+              <p>
+                <strong>This part is public.</strong> Anyone can see this amount arriving at this address, but not that it came from
+                you. Use an address that isn’t linked to you, and don’t withdraw the exact amount you just deposited.
+              </p>
+            </div>
+          )}
+          {step.fundedDeposits && (
+            <div className="sheet-warning is-danger" role="alert" data-testid="withdraw-linked-warning">
+              <img src="/img/alert-triangle.svg" alt="" width={15} height={15} />
+              <p>
+                <strong>This address sent money into your Login account.</strong> Anyone can see both on-chain, so this withdrawal can be
+                tied to you. To keep it private, withdraw to a fresh address instead.
+              </p>
+            </div>
+          )}
+          <div className="sheet-actions">
+            <button type="button" className="sheet-btn" onClick={() => setStep({ kind: 'form' })}>
               Back
+            </button>
+            <button type="button" className="sheet-btn is-primary" onClick={() => void send(step)}>
+              Confirm with passkey
             </button>
           </div>
         </div>
       )}
 
       {step.kind === 'sending' && (
-        <p role="status" className="info" data-testid={`${kind}-status`}>
-          {pw.sendProgress === null || pw.sendProgress < 100
-            ? `Creating the privacy proof… ${Math.round((shownProgress.current = Math.max(shownProgress.current, pw.sendProgress ?? 0)))}% (this takes a little while)`
-            : 'Submitting through the network relay…'}
-        </p>
+        <div className="sheet-body sheet-progress">
+          <img src="/img/loader-spinning.svg" alt="" width={28} height={28} />
+          <p role="status" data-testid={`${kind}-status`}>
+            {pw.sendProgress === null || pw.sendProgress < 100
+              ? `Creating the privacy proof… ${Math.round((shownProgress.current = Math.max(shownProgress.current, pw.sendProgress ?? 0)))}%`
+              : 'Submitting through the network relay…'}
+          </p>
+          <span className="sheet-note">This takes a little while. You can close this; it keeps going.</span>
+        </div>
       )}
 
       {step.kind === 'sent' && (
-        <div className="stack">
-          <p role="status" className="info" data-testid={`${kind}-status`}>
+        <div className="sheet-body sheet-progress">
+          <img src="/img/check-circled.svg" alt="" width={28} height={28} />
+          <p role="status" data-testid={`${kind}-status`}>
             {step.swap ? swapStatus(step.amount, step.swap, depositProgress.get(step.swap.refund.index)) : copy.sent(step.amount)}
           </p>
-          <a className="small" href={sepoliaTx(step.txHash)} target="_blank" rel="noreferrer">
+          <a className="sheet-note" href={sepoliaTx(step.txHash)} target="_blank" rel="noreferrer">
             {copy.link}
           </a>
-          <button className="link" onClick={() => setStep({ kind: 'form' })}>
-            {copy.again}
-          </button>
+          <div className="sheet-actions">
+            <button type="button" className="sheet-btn" onClick={onDone}>
+              Close
+            </button>
+            <button type="button" className="sheet-btn is-primary" onClick={() => setStep({ kind: 'form' })}>
+              {copy.again}
+            </button>
+          </div>
         </div>
       )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
+
       {import.meta.env.DEV && devDetail && (
-        <details className="small">
+        <details className="sheet-note">
           <summary>Technical details (development build only)</summary>
           <pre className="dev-detail" data-testid={`${kind}-dev-detail`}>{devDetail}</pre>
         </details>
       )}
-    </section>
+    </>
   );
 }

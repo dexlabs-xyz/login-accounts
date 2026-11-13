@@ -4,7 +4,10 @@
  *     USDT, USDC or ETH, any amount (USDC and ETH are swapped through Tidepool).
  *   - From Solana: Tidepool's own deposit address (team decision, 6 Nov).
  */
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { AnimatePresence, MotionConfig, motion } from 'motion/react';
+import { QrCode } from '../ui/QrCode.tsx';
+import { useToast } from '../ui/toast.tsx';
 import { privateWallet } from '../railgun/client.ts';
 import { SEPOLIA_USDC, USDC_DECIMALS, USDT_DECIMALS, type DepositRecord } from '../railgun/protocol.ts';
 import { depositProgress, resumeAll, startDeposit, startEvmDeposit, track, type Stage } from './flow.ts';
@@ -44,7 +47,7 @@ function usdcNote(record: DepositRecord): string | null {
     : `You sent ${amount} USDC instead of USDT. That’s fine: it’s going into your private balance as USDC.`;
 }
 
-function stageText(stage: Stage | undefined, record: DepositRecord): string {
+export function stageText(stage: Stage | undefined, record: DepositRecord): string {
   if (stage?.kind === 'waiting-payment') {
     return {
       PENDING_DEPOSIT: 'Waiting for your payment…',
@@ -103,7 +106,18 @@ function stageText(stage: Stage | undefined, record: DepositRecord): string {
   }[record.status];
 }
 
-export function AddMoney() {
+type Step = 'choose' | 'evm' | 'sol' | 'sol-address';
+
+/** Gold's timing (12 Nov): easeOut, 0.2s for the height change and the fade-in (was 0.4s; "50% faster"). */
+const STEP_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
+// The step you leave disappears at once (it showed through while the height changed: Gold, 12 Nov); the next fades in.
+const STEP_FADE = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0, transition: { duration: 0 } } };
+
+/**
+ * The Receive pop-up (Figma 433:5445, 433:5643, 444:6036, 444:6213): choose a chain, then the Ethereum
+ * address (with QR), or the Solana form and its one-time address. The deposit logic is unchanged.
+ */
+export function AddMoney({ resume }: { resume?: { index: number; n: number } | null }) {
   const pw = useWallet();
   useProgress();
   const [tokens, setTokens] = useState<{ usdt: Token; origins: Token[] } | null>(null);
@@ -113,9 +127,57 @@ export function AddMoney() {
   const [solanaRefund, setSolanaRefund] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  /** The amount was refused (e.g. over Tidepool's cap): its field shows a red outline until it's changed. */
+  const [amountBad, setAmountBad] = useState(false);
+  const toast = useToast();
+  // Errors arrive as toasts (they stay until closed), not as text in the pop-up (Gold, 12 Nov).
+  useEffect(() => {
+    if (error) toast.show({ kind: 'error', text: error });
+  }, [error, toast]);
+  useEffect(() => {
+    if (loadError) toast.show({ kind: 'error', text: `Couldn’t reach Tidepool: ${loadError}` });
+  }, [loadError, toast]);
   const [active, setActive] = useState<{ record: DepositRecord; quote: Quote } | null>(null);
   const [evm, setEvm] = useState<DepositRecord | null>(null);
   const [source, setSource] = useState<'evm' | 'sol' | null>(null);
+  /** The pop-up's steps, with the < > chevrons moving back and forward through the ones you've visited. */
+  const [trail, setTrail] = useState<Step[]>(['choose']);
+  const [pos, setPos] = useState(0);
+  const step = trail[pos]!;
+  const go = (next: Step) => {
+    setTrail((t) => [...t.slice(0, pos + 1), next]);
+    setPos((p) => p + 1);
+  };
+  const back = () => setPos((p) => Math.max(0, p - 1));
+  // The current step's real height, which the pop-up animates to.
+  // A callback ref: the steps only appear once the wallet is open, so this attaches whenever they do.
+  const [stepHeight, setStepHeight] = useState<number | 'auto'>('auto');
+  const watch = useRef<ResizeObserver | null>(null);
+  const stepInner = useCallback((el: HTMLDivElement | null) => {
+    watch.current?.disconnect();
+    if (!el) return;
+    watch.current = new ResizeObserver(() => setStepHeight(el.offsetHeight));
+    watch.current.observe(el);
+  }, []);
+  // "Resume" from Notifications: open that deposit's address again (Ethereum address, or the Solana quote).
+  useEffect(() => {
+    if (!resume) return;
+    const d = privateWallet.get().deposits.find((r) => r.index === resume.index);
+    if (!d?.quote) return;
+    if (d.quote.anyToken) {
+      setEvm(d);
+      setTrail(['choose', 'evm']);
+    } else {
+      const q = d.quote;
+      setActive({
+        record: d,
+        quote: { depositAddress: q.tidepoolDepositAddress, amountIn: q.amountIn, amountInFormatted: q.amountInFormatted, amountOut: q.expectedUsdt, minAmountOut: q.minUsdt, deadline: q.deadline, timeEstimate: 0 },
+      });
+      setTrail(['choose', 'sol-address']);
+    }
+    setPos(1);
+  }, [resume]);
+  const forward = () => setPos((p) => Math.min(trail.length - 1, p + 1));
   /** Read-only mainnet NEAR Intents price check (approved exception); hidden on any error. */
   const [mainnet, setMainnet] = useState<MainnetPrice | null>(null);
   useEffect(() => {
@@ -151,224 +213,341 @@ export function AddMoney() {
   const afterShield = (usdt: string) =>
     shieldFeeBp === null ? null : ((BigInt(usdt) * BigInt(10_000 - shieldFeeBp)) / 10_000n).toString();
 
-  const submit = async () => {
-    if (!tokens || !origin || !units || !solanaOk) return;
+  /** True once there's a deposit address to show. */
+  const submit = async (): Promise<boolean> => {
+    if (!tokens || !origin || !units || !solanaOk) return false;
     setError('');
     setBusy(true);
     try {
       setActive(await startDeposit({ origin, usdt: tokens.usdt, amount: units, solanaRefund: solanaRefund.trim() }));
+      return true;
     } catch (e) {
+      setAmountBad(true);
       setError(e instanceof Error && e.message !== 'Error' ? e.message : 'Couldn’t start the deposit. Try again.');
+      return false;
     } finally {
       setBusy(false);
     }
   };
 
-  const startEvm = async () => {
+  const startEvm = async (): Promise<boolean> => {
     setError('');
     setBusy(true);
     try {
       setEvm(await startEvmDeposit());
+      return true;
     } catch (e) {
       setError(e instanceof Error && e.message !== 'Error' ? e.message : 'Couldn’t start the deposit. Try again.');
+      return false;
     } finally {
       setBusy(false);
     }
   };
-  const reset = () => {
-    setActive(null);
-    setEvm(null);
-    setSource(null);
-  };
-  const copy = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
 
-  const history = [...pw.deposits].filter((d) => d.status !== 'new').reverse();
+  const chooseEvm = async () => {
+    if (evm) return go('evm');
+    setSource('evm');
+    if (await startEvm()) go('evm');
+  };
+  const getAddress = async () => {
+    if (await submit()) go('sol-address');
+  };
+  const solActive = active && active.record.quote?.originChain === 'sol' ? active : null;
+  const record = (r: DepositRecord) => pw.deposits.find((d) => d.index === r.index) ?? r;
+
+  const warning = (text: string) => (
+    <div className="sheet-warning" role="note">
+      <img src="/img/alert-triangle.svg" alt="" width={15} height={15} />
+      <p>{text}</p>
+    </div>
+  );
+  // Progress shows as toasts (DepositToasts below), not as text in the pop-up (Gold, 12 Nov). The full status
+  // stays as screen-reader text, which the browser tests also read.
+  const status = (r: DepositRecord) => (
+    <>
+      <p className="visually-hidden" data-testid="active-deposit-status">
+        {stageText(depositProgress.get(r.index), record(r))}
+      </p>
+      {usdcNote(record(r)) && (
+        <p className="visually-hidden" data-testid="active-deposit-usdc-note">
+          {usdcNote(record(r))}
+        </p>
+      )}
+    </>
+  );
 
   return (
-    <section className="card" aria-labelledby="add-h">
-      <h2 id="add-h">
-        Add money <span className="badge">Testnet</span>
-      </h2>
-      <p className="muted small">
-        Whatever you send arrives as USDT in your private balance. Swaps use Tidepool, a community testnet for NEAR Intents.
-      </p>
-      {loadError && <p className="error" role="alert">Couldn’t reach Tidepool: {loadError}</p>}
-
-      {!active && !evm && !source && (
-        <div className="row" role="group" aria-label="Where are you sending from?">
-          <button className="primary" disabled={busy} onClick={() => (setSource('evm'), void startEvm())}>
-            {busy ? 'Creating your address…' : 'From an Ethereum wallet'}
+    <div className="sheet">
+      <header className="sheet-head">
+        <h2>Receive</h2>
+        <div className="sheet-steps">
+          <button type="button" className="icon-btn" aria-label="Previous step" disabled={pos === 0} onClick={back}>
+            <img src="/img/chevron-left-sm.svg" alt="" width={15} height={15} />
           </button>
-          <button onClick={() => setSource('sol')}>From Solana</button>
-        </div>
-      )}
-
-      {evm && (
-        <div className="stack" aria-label="Deposit instructions">
-          <p>
-            Send <strong>USDT, USDC or ETH</strong> on <strong>Ethereum Sepolia</strong> to this address, any amount:
-          </p>
-          <div className="row">
-            <code className="address" data-testid="tidepool-deposit-address">
-              {evm.address}
-            </code>
-            <button className="link" onClick={() => copy(evm.address)}>
-              Copy
-            </button>
-          </div>
-          <p className="warning small">
-            Only these three tokens, and only on Ethereum Sepolia. Other tokens or networks won’t arrive in your balance.
-          </p>
-          <p className="small muted">
-            It all becomes private USDT: USDC and ETH are swapped at Tidepool’s rate, and Railgun keeps{' '}
-            {shieldFeeBp !== null ? `${shieldFeeBp / 100}%` : 'a small fee'} as money enters the private pool. A little ETH is kept
-            to pay future network fees. Gas is covered on testnet. On-chain, the wallet you send from is visible as this
-            address’s funder. The address is yours and stays open for 24 hours.
-          </p>
-          {mainnet && (
-            <p className="small muted" data-testid="mainnet-price">
-              On mainnet today, NEAR Intents swaps {mainnet.usdcIn} USDC into <strong>{mainnet.usdtOut} USDT</strong>
-              {mainnet.seconds ? ` in about ${mainnet.seconds} seconds` : ''}. Live price check only: nothing is sent.
-            </p>
-          )}
-          <p role="status" className="info" data-testid="active-deposit-status">
-            {stageText(depositProgress.get(evm.index), pw.deposits.find((d) => d.index === evm.index) ?? evm)}
-          </p>
-          {usdcNote(pw.deposits.find((d) => d.index === evm.index) ?? evm) && (
-            <p className="warning small" data-testid="active-deposit-usdc-note">
-              {usdcNote(pw.deposits.find((d) => d.index === evm.index) ?? evm)}
-            </p>
-          )}
-          <button className="link" onClick={reset}>
-            Start another deposit
+          <button type="button" className="icon-btn" aria-label="Next step" disabled={pos >= trail.length - 1} onClick={forward}>
+            <img src="/img/chevron-right.svg" alt="" width={15} height={15} />
           </button>
         </div>
-      )}
+      </header>
 
-      {source === 'sol' && !active && tokens && (
-        <form className="stack" onSubmit={(e) => (e.preventDefault(), void submit())}>
-          <label>
-            Send from
-            <select value={choice} onChange={(e) => setChoice(e.target.value)} required>
-              <option value="">Choose a token…</option>
-              {tokens.origins.map((t) => (
-                <option key={t.assetId} value={t.assetId}>
-                  {t.symbol} on {CHAIN_NAMES[t.blockchain as OriginChain]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Amount
-            <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 5" required />
-          </label>
-          {needsSolanaRefund && (
-            <label>
-              Your Solana address (refunds go here if the swap fails)
-              <input value={solanaRefund} onChange={(e) => setSolanaRefund(e.target.value)} required />
-              {solanaRefund && !solanaOk && <span className="error small">That isn’t a Solana address.</span>}
-            </label>
-          )}
-          <div className="row">
-            <button type="submit" className="primary" disabled={busy || !units || !solanaOk}>
-              {busy ? 'Getting a quote…' : 'Get deposit address'}
-            </button>
-            <button type="button" className="link" onClick={reset}>
-              Back
-            </button>
-          </div>
-        </form>
-      )}
+      {/* The pop-up's height goes straight from one step's to the next (no folding away first: Gold, 12 Nov). It's
+          centred, so it grows and shrinks up and down equally; the steps cross-fade inside it. */}
+      <MotionConfig reducedMotion="user">
+        <motion.div className="sheet-step" initial={false} animate={{ height: stepHeight }} transition={STEP_TRANSITION}>
+        <div ref={stepInner}>
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.div key={step} {...STEP_FADE} transition={STEP_TRANSITION}>
+            {step === 'choose' && (
+              <>
+                <p className="sheet-sub">Receive any token on either chain</p>
+                <div className="sheet-list" role="group" aria-label="Where are you sending from?">
+                  <button type="button" className="sheet-row" onClick={() => (setSource('sol'), go('sol'))}>
+                    <img src="/img/chain-solana.svg" alt="" width={22} height={22} />
+                    <span>Solana</span>
+                    <img className="sheet-row-go" src="/img/chevron-right.svg" alt="" width={15} height={15} />
+                  </button>
+                  <button type="button" className="sheet-row" onClick={() => void chooseEvm()} disabled={busy} aria-busy={busy}>
+                    <img src="/img/chain-ethereum.svg" alt="" width={22} height={22} />
+                    <span>Ethereum Sepolia</span>
+                    <img
+                      className="sheet-row-go"
+                      src={busy ? '/img/loader-spinning.svg' : '/img/chevron-right.svg'}
+                      alt=""
+                      width={15}
+                      height={15}
+                    />
+                  </button>
+                </div>
+              </>
+            )}
 
-      {active && (
-        <div className="stack" aria-label="Deposit instructions">
-          <p>
-            Send exactly{' '}
-            <strong>
-              {active.quote.amountInFormatted || active.quote.amountIn} {active.record.quote?.originSymbol}
-            </strong>{' '}
-            on <strong>{CHAIN_NAMES[active.record.quote!.originChain as OriginChain]}</strong> to:
-          </p>
-          <div className="row">
-            <code className="address" data-testid="tidepool-deposit-address">
-              {active.quote.depositAddress}
-            </code>
-            <button className="link" onClick={() => copy(active.quote.depositAddress)}>
-              Copy
-            </button>
-          </div>
-          {active.record.quote?.direct && (
-            <p className="small muted">
-              Direct deposit: no swap, so this skips NEAR Intents. On-chain, your wallet will be visible as the sender to
-              this deposit address. To hide it, deposit a different token so the swap sends it instead.
-            </p>
-          )}
-          <p className="small">
-            You’ll receive about <strong>{formatUnits(afterShield(active.quote.amountOut) ?? active.quote.amountOut, USDT_DECIMALS)} USDT</strong>{' '}
-            privately (at least {formatUnits(afterShield(active.quote.minAmountOut) ?? active.quote.minAmountOut, USDT_DECIMALS)}).
-            {shieldFeeBp !== null &&
-              (active.record.quote?.direct
-                ? ` Includes Railgun’s ${shieldFeeBp / 100}% fee for entering the private pool.`
-                : ` Includes Tidepool’s rate and Railgun’s ${shieldFeeBp / 100}% fee for entering the private pool.`)}{' '}
-            Gas is covered on testnet.{' '}
-            {active.record.quote?.direct
-              ? 'This address stays open for 24 hours.'
-              : `Quote valid until ${new Date(active.quote.deadline).toLocaleTimeString()}.`}
-          </p>
-          <p role="status" className="info" data-testid="active-deposit-status">
-            {stageText(depositProgress.get(active.record.index), active.record)}
-          </p>
-          {usdcNote(active.record) && (
-            <p className="warning small" data-testid="active-deposit-usdc-note">
-              {usdcNote(active.record)}
-            </p>
-          )}
-          <button className="link" onClick={reset}>
-            Start another deposit
-          </button>
-        </div>
-      )}
-      {error && <p className="error" role="alert">{error}</p>}
-
-      {history.length > 0 && (
-        <>
-          <h3 className="small">Your deposits</h3>
-          <ul className="passkeys" aria-label="Deposits">
-            {history.map((d) => {
-              const stage = depositProgress.get(d.index);
-              const canFinish =
-                stage?.kind === 'needs-finish' || stage?.kind === 'late-funds' || (stage?.kind === 'failed' && d.status === 'delivered');
-              return (
-                <li key={d.index}>
-                  <div>
-                    <strong>
-                      {d.withdrawal
-                        ? `Refund of a withdrawal (${d.withdrawal.symbol} on ${CHAIN_NAMES[d.withdrawal.chain as OriginChain] ?? d.withdrawal.chain})`
-                        : d.quote?.anyToken
-                        ? `Deposit on Ethereum Sepolia`
-                        : d.quote
-                          ? `${d.quote.amountInFormatted || d.quote.amountIn} ${d.quote.originSymbol} from ${CHAIN_NAMES[d.quote.originChain as OriginChain]}`
-                          : `Deposit #${d.index + 1}`}
-                    </strong>
-                    <div className="muted small" data-testid={`deposit-${d.index}-status`}>
-                      {stageText(stage, d)}
-                    </div>
-                    {usdcNote(d) && <div className="small" data-testid={`deposit-${d.index}-usdc-note`}>{usdcNote(d)}</div>}
-                    {d.shieldTx && (
-                      <a className="small" href={sepoliaTx(d.shieldTx)} target="_blank" rel="noreferrer">
-                        View on Sepolia Etherscan
-                      </a>
-                    )}
+            {step === 'evm' && evm && (
+              <>
+                <p className="sheet-sub">Send USDT, USDC, or ETH to this address</p>
+                <div className="sheet-body">
+                  <div className="sheet-qr">
+                    <QrCode value={evm.address} />
                   </div>
-                  {canFinish && (
-                    <button onClick={() => void track({ ...d, status: 'delivered' })}>Finish deposit</button>
+                  <div className="sheet-group">
+                    <span className="sheet-label" id="evm-wallet-label">
+                      Wallet
+                    </span>
+                    <div className="sheet-field">
+                      <code className="address" data-testid="tidepool-deposit-address" aria-labelledby="evm-wallet-label">
+                        {evm.address}
+                      </code>
+                      <CopyIcon value={evm.address} label="Copy the deposit address" />
+                    </div>
+                  </div>
+                  {warning(
+                    'Please only receive supported assets on ETH Sepolia chain; USDC, USDT, or ETH. Sending any other asset or on any other chain may lead to permanent loss of funds.',
                   )}
-                </li>
-              );
-            })}
-          </ul>
-        </>
-      )}
-    </section>
+                  {mainnet && (
+                    <p className="sheet-note" data-testid="mainnet-price">
+                      On mainnet today, NEAR Intents swaps {mainnet.usdcIn} USDC into <strong>{mainnet.usdtOut} USDT</strong>
+                      {mainnet.seconds ? ` in about ${mainnet.seconds} seconds` : ''}. Live price check only: nothing is sent.
+                    </p>
+                  )}
+                  {status(evm)}
+                </div>
+              </>
+            )}
+
+            {step === 'sol' && (
+              <>
+                <p className="sheet-sub">Receive a token on Solana</p>
+                {tokens ? (
+                  <form className="sheet-body is-form" onSubmit={(e) => (e.preventDefault(), void getAddress())}>
+                    <label className="sheet-group">
+                      <span className="sheet-label">Select token</span>
+                      <span className="sheet-field is-select">
+                        <select value={choice} onChange={(e) => setChoice(e.target.value)} required>
+                          <option value="">Select</option>
+                          {tokens.origins.map((t) => (
+                            <option key={t.assetId} value={t.assetId}>
+                              {t.symbol} on {CHAIN_NAMES[t.blockchain as OriginChain]}
+                            </option>
+                          ))}
+                        </select>
+                        <img src="/img/chevron-down.svg" alt="" width={15} height={15} />
+                      </span>
+                    </label>
+                    <label className="sheet-group">
+                      <span className="sheet-label">Enter amount</span>
+                      <span className={`sheet-field${amountBad ? ' is-error' : ''}`}>
+                        <input
+                          inputMode="decimal"
+                          value={amount}
+                          onChange={(e) => (setAmount(e.target.value), setAmountBad(false))}
+                          aria-invalid={amountBad}
+                          placeholder={`E.g. ${origin?.symbol === 'SOL' ? '0.5' : '5'} ${origin?.symbol ?? ''}`.trim()}
+                          required
+                        />
+                      </span>
+                    </label>
+                    {needsSolanaRefund && (
+                      <label className="sheet-group">
+                        <span className="sheet-label">
+                          Refund address
+                          <img
+                            src="/img/info.svg"
+                            alt=""
+                            width={12}
+                            height={12}
+                            title="If the swap can’t happen, your tokens go back to this Solana address. Use one you control."
+                          />
+                        </span>
+                        <span className={`sheet-field${solanaRefund && !solanaOk ? ' is-error' : ''}`}>
+                          <input
+                            value={solanaRefund}
+                            aria-invalid={!!solanaRefund && !solanaOk}
+                            onChange={(e) => {
+                              setSolanaRefund(e.target.value);
+                              if (isValidAddress('sol', e.target.value.trim())) toast.dismiss('sol-refund');
+                            }}
+                            // Red outline while it's wrong; the words come once you leave the field, not while typing (Gold, 13 Nov).
+                            onBlur={(e) => {
+                              const v = e.target.value.trim();
+                              if (v && !isValidAddress('sol', v)) toast.show({ id: 'sol-refund', kind: 'error', text: 'That isn’t a Solana address.' });
+                            }}
+                            placeholder="Your Solana address"
+                            aria-describedby="refund-why"
+                            required
+                          />
+                        </span>
+                        <span id="refund-why" className="visually-hidden">
+                          If the swap can’t happen, your tokens go back to this Solana address.
+                        </span>
+                      </label>
+                    )}
+                    <div className="sheet-actions">
+                      <button type="button" className="sheet-btn" onClick={back}>
+                        Cancel
+                      </button>
+                      <button type="submit" className="sheet-btn is-primary" disabled={busy || !units || !solanaOk} aria-busy={busy}>
+                        {busy ? 'Getting a quote…' : 'Get Deposit Address'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <p className="sheet-status">Loading tokens…</p>
+                )}
+              </>
+            )}
+
+            {step === 'sol-address' && solActive && (
+              <>
+                <p className="sheet-sub">
+                  Receive {solActive.record.quote?.originSymbol} on {CHAIN_NAMES[solActive.record.quote!.originChain as OriginChain]}
+                </p>
+                <div className="sheet-body">
+                  <dl className="sheet-summary">
+                    <div>
+                      <dt>Token</dt>
+                      <dd>{solActive.record.quote?.originSymbol}</dd>
+                    </div>
+                    <div>
+                      <dt>Chain</dt>
+                      <dd>{CHAIN_NAMES[solActive.record.quote!.originChain as OriginChain]}</dd>
+                    </div>
+                    <div>
+                      <dt>Amount</dt>
+                      <dd>
+                        {solActive.quote.amountInFormatted || solActive.quote.amountIn} {solActive.record.quote?.originSymbol}
+                        <CopyIcon value={solActive.quote.amountInFormatted || solActive.quote.amountIn} label="Copy the exact amount" />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>You receive</dt>
+                      <dd>
+                        about {formatUnits(afterShield(solActive.quote.amountOut) ?? solActive.quote.amountOut, USDT_DECIMALS)} USDT
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Send before</dt>
+                      <dd>{new Date(solActive.quote.deadline).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</dd>
+                    </div>
+                  </dl>
+                  <div className="sheet-group">
+                    <span className="sheet-label" id="sol-wallet-label">
+                      Wallet
+                    </span>
+                    <div className="sheet-field">
+                      <code className="address" data-testid="tidepool-deposit-address" aria-labelledby="sol-wallet-label">
+                        {solActive.quote.depositAddress}
+                      </code>
+                      <CopyIcon value={solActive.quote.depositAddress} label="Copy the deposit address" />
+                    </div>
+                  </div>
+                  {warning(
+                    `Please only send ${solActive.record.quote?.originSymbol} on Solana devnet, the exact amount above. Sending any other asset or on any other chain may lead to permanent loss of funds.`,
+                  )}
+                  {status(solActive.record)}
+                </div>
+              </>
+            )}
+          </motion.div>
+        </AnimatePresence>
+        </div>
+        </motion.div>
+      </MotionConfig>
+      <DepositToasts records={[evm, solActive?.record].filter((r): r is DepositRecord => !!r)} />
+    </div>
   );
+}
+
+/** A copy icon that turns into a check for a moment once the value is on the clipboard. */
+function CopyIcon({ value, label }: { value: string; label: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      className="icon-btn sheet-copy"
+      aria-label={done ? 'Copied' : label}
+      onClick={() =>
+        void navigator.clipboard?.writeText(value).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1500);
+        })
+      }
+    >
+      <img src={done ? '/img/check.svg' : '/img/copy-sm.svg'} alt="" width={15} height={15} />
+    </button>
+  );
+}
+
+/**
+ * A deposit's progress as toasts: one toast per deposit that changes as it goes (spinner while swapping and
+ * moving it in, then done, refunded or failed). Waiting for the payment shows nothing (Gold, 12 Nov).
+ */
+function DepositToasts({ records }: { records: DepositRecord[] }) {
+  useProgress();
+  const toast = useToast();
+  const last = useRef(new Map<number, string>());
+  const key = records.map((r) => `${r.index}:${depositProgress.get(r.index)?.kind ?? r.status}:${(depositProgress.get(r.index) as { swap?: string } | undefined)?.swap ?? ''}`).join('|');
+  useEffect(() => {
+    for (const r of records) {
+      const stage = depositProgress.get(r.index);
+      const now = `${stage?.kind ?? r.status}:${(stage as { swap?: string } | undefined)?.swap ?? ''}`;
+      if (last.current.get(r.index) === now) continue;
+      last.current.set(r.index, now);
+      const id = `deposit-${r.index}`;
+      const kind = stage?.kind;
+      if (!kind || kind === 'waiting-evm' || kind === 'waiting-direct') continue;
+      if (kind === 'waiting-payment' && stage.swap === 'PENDING_DEPOSIT') continue;
+      if (kind === 'done') {
+        toast.show({ id, kind: 'success', text: 'Your deposit is in your private balance', description: 'Spendable after Railgun’s privacy check: a few minutes to about two hours.' });
+      } else if (kind === 'refunded') {
+        toast.show({ id, kind: 'info', text: stageText(stage, r) });
+      } else if (kind === 'failed') {
+        toast.show({ id, kind: 'error', text: stageText(stage, r) });
+      } else if (kind === 'needs-finish' || kind === 'late-funds') {
+        toast.show({ id, kind: 'warning', text: stageText(stage, r) });
+      } else {
+        toast.show({ id, kind: 'loading', text: stageText(stage, r) });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return null;
 }

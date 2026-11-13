@@ -5,7 +5,7 @@
  */
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
-import { Device, disableAutofill, signUp } from './helpers.ts';
+import { chooseSend, closeSheet, Device, disableAutofill, errorTexts, goTo, openSheet, signUp } from './helpers.ts';
 import { fundedAccount, log, watch } from './live.ts';
 
 test.describe.configure({ timeout: 240 * 60_000 });
@@ -21,7 +21,7 @@ async function confirm(page: Page, panel: Locator, statusId: string, done: RegEx
       () => false,
     );
     if (ok) return;
-    const alert = (await panel.getByRole('alert').textContent().catch(() => '')) ?? '';
+    const alert = await errorTexts(page);
     say(`attempt ${attempt}: ${alert}`);
     if (!/network relay couldn’t confirm/.test(alert) || attempt >= 4) throw new Error(`Failed: ${alert}`);
   }
@@ -40,31 +40,40 @@ test('History lists the deposit, the private send and the withdrawal; the receiv
   const addressB = (await pageB.getByRole('region', { name: /Private balance/ }).locator('code.address').getAttribute('title', { timeout: 120_000 }))!;
 
   const spendableBefore = (await page.getByRole('region', { name: /Private balance/ }).getByTestId('balance-Spendable-usdt').textContent()) ?? '';
-  const send = page.getByRole('region', { name: /Send privately/ });
-  await send.getByLabel('To (private 0zk address)').fill(addressB);
-  await send.getByLabel('Amount (USDT)').fill('0.5');
+  const send = await chooseSend(page, 'Privately via Railgun');
+  await send.getByLabel('0zk address').fill(addressB);
+  await send.getByLabel('Enter amount').fill('0.5');
   await confirm(page, send, 'transfer-status', /^Sent /);
   say('sent 0.5 USDT to B');
 
   // The second spend uses the other deposit (and its fee reserve). Wait, like a person would, until
   // the balance shows the send (250 USDT no longer all spendable), then until fees are covered.
+  await closeSheet(page);
   const card = page.getByRole('region', { name: /Private balance/ });
+  let lastLine = '';
   await expect
-    .poll(async () => (await page.keyboard.press('Shift'), (await card.getByTestId('balance-Spendable-usdt').textContent().catch(() => '')) ?? ''), {
+    .poll(async () => {
+      await page.keyboard.press('Shift');
+      const line = (await card.locator('.hero-status').allInnerTexts().catch(() => [] as string[])).join(' / ');
+      if (line !== lastLine) say(`balance: ${(lastLine = line)}`);
+      return (await card.getByTestId('balance-Spendable-usdt').textContent().catch(() => '')) ?? '';
+    }, {
       timeout: 30 * 60_000,
       intervals: [15_000],
     })
     .not.toBe(spendableBefore);
   await expect.poll(async () => (await page.keyboard.press('Shift'), page.getByTestId('fee-reserve-ready').isVisible()), { timeout: 30 * 60_000, intervals: [15_000] }).toBe(true);
-  const withdraw = page.getByRole('region', { name: /^Withdraw/ });
+  const withdraw = await chooseSend(page, 'To an Ethereum address');
   const to = Wallet.createRandom().address; // throwaway, testnet only
-  await withdraw.getByLabel(/^To \(/).fill(to);
-  await withdraw.getByLabel('Amount (USDT)').fill('1');
+  await withdraw.getByLabel('Address').fill(to);
+  await withdraw.getByLabel('Enter amount').fill('1');
   await confirm(page, withdraw, 'unshield-status', /^Withdrew /);
   say('withdrew 1 USDT');
 
-  const history = page.getByRole('region', { name: 'History' });
-  const want = [/Added 250 test USDT.*Our server saw your private address for this one claim only/, /Sent 0\.5 USDT privately to 0zk/, new RegExp(`Withdrew 1 USDT to ${to.slice(0, 8)}`)];
+  await closeSheet(page);
+  await goTo(page, 'Notifications'); // the full list (Home shows the latest four)
+  const history = page.getByRole('region', { name: 'Notifications' });
+  const want = [/Added 250 test USDT/, /Sent 0\.5 USDT privately to 0zk/, new RegExp(`Withdrew 1 USDT to ${to.slice(0, 8)}`)];
   let last = '';
   await expect
     .poll(
@@ -78,7 +87,7 @@ test('History lists the deposit, the private send and the withdrawal; the receiv
     )
     .toBe(true);
 
-  const historyB = pageB.getByRole('region', { name: 'History' });
+  const historyB = pageB.getByRole('region', { name: 'Notifications' }); // Home's card
   await expect(historyB).toContainText(/Received 0\.5 USDT privately/, { timeout: 20 * 60_000 });
   await expect(historyB.locator('li[data-kind="received"]')).toHaveAttribute('data-status', /checking|spendable/);
   say(`B history: ${(await historyB.innerText()).replace(/\n+/g, ' | ').slice(0, 300)}`);

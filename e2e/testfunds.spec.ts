@@ -4,7 +4,7 @@
  * long until it's spendable. Needs TESTNET_POOL_MNEMONIC in .env.
  */
 import { expect, test } from '@playwright/test';
-import { Device, disableAutofill, signUp } from './helpers.ts';
+import { Device, disableAutofill, errorToast, signUp, toastWith } from './helpers.ts';
 import { log } from './live.ts';
 
 test.describe.configure({ timeout: 180 * 60_000 });
@@ -16,10 +16,12 @@ test('a new account claims 250 test USDT once; it becomes spendable', async ({ p
   await Device.add(page);
   await signUp(page);
   const card = page.getByRole('region', { name: /Private balance/ });
-  await expect(card.getByTestId('private-empty')).toBeVisible({ timeout: 240_000 });
+  await expect(card.getByTestId('private-empty')).toHaveText('No private funds yet.', { timeout: 240_000 });
 
-  const funds = page.getByRole('region', { name: /Test funds/ });
-  await expect(funds.getByText(/our server is told your private address for this one claim/)).toBeVisible({ timeout: 60_000 });
+  // "Test USDT" on Home; every update about the top-up arrives as a toast (testfunds-status).
+  const funds = page;
+  const button = page.getByRole('button', { name: 'Test USDT', exact: true });
+  await expect(button).toBeVisible({ timeout: 60_000 });
 
   // The pool may still be starting or waiting for its own privacy check: retry until it accepts.
   const t0 = Date.now();
@@ -28,11 +30,10 @@ test('a new account claims 250 test USDT once; it becomes spendable', async ({ p
       async () => {
         await page.keyboard.press('Shift'); // stay "active" (15-minute idle lock)
         if (await funds.getByTestId('testfunds-status').isVisible()) return true;
-        const button = funds.getByRole('button', { name: /Get 250 test USDT/ });
         if (await button.isEnabled().catch(() => false)) await button.click();
         await page.waitForTimeout(3_000);
         // Don't wait for an error that may never come (a successful claim shows none).
-        const alert = funds.getByRole('alert');
+        const alert = errorToast(page);
         const err = (await alert.isVisible()) ? ((await alert.textContent({ timeout: 1_000 }).catch(() => '')) ?? '') : '';
         if (err) say(`+${Math.round((Date.now() - t0) / 1000)}s claim refused: ${err}`);
         return funds.getByTestId('testfunds-status').isVisible();
@@ -42,10 +43,11 @@ test('a new account claims 250 test USDT once; it becomes spendable', async ({ p
     .toBe(true);
   say(`claim accepted after ${Math.round((Date.now() - t0) / 1000)}s`);
 
-  await expect(funds.getByTestId('testfunds-status')).toHaveText(/^Sent 250 test USDT/, { timeout: 10 * 60_000 });
-  const href = await funds.getByRole('link', { name: /View on Sepolia Etherscan/ }).getAttribute('href');
-  say(`sent: ${href}`);
-  await expect(funds.getByRole('button', { name: /Get 250 test USDT/ })).toHaveCount(0); // once only
+  await expect(funds.getByTestId('testfunds-status')).toHaveText(/^Sent \$250 to your private balance/, { timeout: 10 * 60_000 });
+  await expect(funds.getByTestId('testfunds-privacy')).toContainText('We see your private address only this once');
+  say('sent');
+  await button.click(); // once only: the button stays, pressing it again says so
+  await expect(toastWith(page, 'You already claimed!')).toBeVisible();
 
   // Measure: how long until a received private transfer is spendable (decides how instant this feels).
   const t1 = Date.now();
