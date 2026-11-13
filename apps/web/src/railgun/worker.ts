@@ -258,6 +258,7 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
         ownDepositAddresses: async () => new Set((await deposits!.list()).map((r) => r.address.toLowerCase())),
         depositFunders: async () => new Set((await deposits!.list()).flatMap((r) => r.funders ?? [])),
         onProgress: (progress) => post({ type: 'send-progress', progress }),
+        onRetry: (attempt) => post({ type: 'send-retry', attempt }),
       });
 
       // Sepolia requires a Proof of Innocence node before the SDK will read the chain.
@@ -324,7 +325,15 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
         })();
         post({ type: 'result', id: msg.id, ok: true, value });
       } catch (err) {
-        post({ type: 'result', id: msg.id, ok: false, error: err instanceof Error ? err.name : 'Error', detail: errorDetail(err) });
+        post({
+          type: 'result',
+          id: msg.id,
+          ok: false,
+          error: err instanceof Error ? err.name : 'Error',
+          detail: errorDetail(err),
+          // A broadcaster's own refusal text, already cleaned (send.ts refusalReason); never wallet data.
+          reason: err instanceof Error && 'reason' in err && typeof err.reason === 'string' ? err.reason : undefined,
+        });
       }
       return;
     }

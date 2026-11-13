@@ -173,6 +173,8 @@ export type FromWorker =
   | { type: 'deposits'; records: DepositRecord[] }
   /** Proof generation progress for a private send, 0..100. */
   | { type: 'send-progress'; progress: number }
+  /** A broadcaster refused the send; the next one is being tried (attempt = refusals so far). */
+  | { type: 'send-retry'; attempt: number }
   | { type: 'result'; id: number; ok: true; value: unknown }
-  | { type: 'result'; id: number; ok: false; error: string; detail?: string }
+  | { type: 'result'; id: number; ok: false; error: string; detail?: string; /** broadcaster-refused: its short reason */ reason?: string }
   | { type: 'error'; message: string; /** development builds only */ detail?: string };

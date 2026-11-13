@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickBroadcaster } from './broadcasters.ts';
+import { pickBroadcaster, refusalReason } from './broadcasters.ts';
 
 const b = (name: string, fee: string, reliability: number) => ({ name, tokenFee: { feePerUnitGas: fee, reliability } });
 
@@ -14,5 +14,20 @@ describe('pickBroadcaster', () => {
   it('returns nothing when there is no broadcaster', () => {
     expect(pickBroadcaster([])).toBeUndefined();
     expect(pickBroadcaster(undefined)).toBeUndefined();
+  });
+});
+
+describe('refusalReason', () => {
+  const refused = (cause: unknown) => new Error('Received response error from broadcaster.', { cause });
+  it('gives the broadcaster’s own text', () => {
+    expect(refusalReason(refused(new Error('Broadcaster cannot process this transaction.')))).toBe('Broadcaster cannot process this transaction.');
+  });
+  it('cuts out anything address- or hash-like', () => {
+    const r = refusalReason(refused(new Error('POI invalid for 0x1234567890abcdef1234 and 0zk1qy8hgc6sabcdefghijklmnop')));
+    expect(r).toBe('POI invalid for … and …');
+  });
+  it('is short, and nothing when there is no reason', () => {
+    expect(refusalReason(refused(new Error('x'.repeat(400))))!.length).toBeLessThanOrEqual(140);
+    expect(refusalReason(new Error('no cause'))).toBeUndefined();
   });
 });

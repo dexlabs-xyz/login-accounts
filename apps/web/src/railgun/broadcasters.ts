@@ -24,3 +24,20 @@ export function pickBroadcaster<T extends BroadcasterChoice>(candidates: readonl
     return fa === fb ? 0 : fa < fb ? -1 : 1;
   })[0];
 }
+
+/**
+ * The broadcaster's own short reason for refusing, safe to show: it's the broadcaster's text, not wallet data, and
+ * anything address- or hash-like is cut out anyway. So the next refusal says why instead of leaving us guessing.
+ */
+export function refusalReason(e: unknown): string | undefined {
+  const cause = e instanceof Error ? e.cause : undefined;
+  const text = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
+  const clean = text
+    .replace(/0x[0-9a-fA-F]{8,}/g, '…')
+    .replace(/0zk[0-9a-z]{10,}/g, '…')
+    .replace(/[^\x20-\x7E\u00A0-\u024F’“”…]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return undefined;
+  return clean.length > 140 ? `${clean.slice(0, 139)}…` : clean;
+}

@@ -35,7 +35,7 @@ const ERRORS: Record<string, string> = {
   'fee-too-high': 'The network fee quoted is unusually high, so we stopped. Try again later.',
   'quote-expired': 'The fee quote expired. Review it again.',
   'broadcaster-refused':
-    'The network relay couldn’t confirm the privacy check on your funds, so nothing was sent. Press Review again to use a different relay.',
+    'The network relays turned this down (we tried three), so nothing was sent. Wait a minute, then press Review again.',
   'still-confirming':
     'Your last transaction is still being confirmed, so its money can’t be used yet. Nothing was sent. Wait a minute, then press Review again.',
   'Wallet locked.': 'Your wallet locked. Unlock and try again.',
@@ -46,7 +46,10 @@ const explain = (e: unknown, kind: Kind) =>
     (/capped/i.test(e.message)
       ? 'Tidepool’s testnet sends at most 0.006 ETH per withdrawal (about 12 USDT). Withdraw less, or choose USDC.'
       : 'Tidepool couldn’t price this swap right now. Try again, or withdraw as USDT.')) ||
-  (e instanceof Error && ERRORS[e.message]) ||
+  (e instanceof Error &&
+    ERRORS[e.message] &&
+    // The relay's own reason, so a refusal says why (Gold, 13 Nov). Its text, never wallet data (send.ts).
+    `${ERRORS[e.message]}${(e as Error & { reason?: string }).reason ? ` Relay said: “${(e as Error & { reason?: string }).reason}”` : ''}`) ||
   (kind === 'transfer' ? 'The send didn’t go through. Nothing was sent.' : 'The withdrawal didn’t go through. Nothing was sent.');
 
 /**
@@ -178,8 +181,17 @@ export function SendPanel({
     const d = import.meta.env.DEV && e instanceof Error ? (e as Error & { devDetail?: string }).devDetail : undefined;
     setDevDetail(d ? `${stage}: ${e instanceof Error ? e.message : ''}\n${d}` : import.meta.env.DEV && e instanceof Error ? `${stage}: ${e.message}` : '');
   };
-  // The SDK reports progress per proof stage, so it can restart at 0. Never show it going back.
+  // The SDK reports progress per proof stage, so it can restart at 0. Never show it going back,
+  // except when another relay is tried: that's a new proof, from 0 (Gold, 13 Nov).
   const shownProgress = useRef(0);
+  const lastRetries = useRef(0);
+  const retriesSeen = (n: number) => {
+    if (n !== lastRetries.current) {
+      lastRetries.current = n;
+      shownProgress.current = 0;
+    }
+    return true;
+  };
   const [price, setPrice] = useState<number | null>(null);
   useEffect(() => {
     void ethPrice().then(setPrice);
@@ -470,6 +482,7 @@ export function SendPanel({
         <div className="sheet-body sheet-progress">
           <img src="/img/loader-spinning.svg" alt="" width={28} height={28} />
           <p role="status" data-testid={`${kind}-status`}>
+            {retriesSeen(pw.sendRetries) && pw.sendRetries > 0 && (pw.sendProgress === null || pw.sendProgress < 100) ? 'Trying another relay… ' : ''}
             {pw.sendProgress === null || pw.sendProgress < 100
               ? `Creating the privacy proof… ${Math.round((shownProgress.current = Math.max(shownProgress.current, pw.sendProgress ?? 0)))}%`
               : 'Submitting through the network relay…'}
