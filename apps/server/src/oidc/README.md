@@ -44,8 +44,13 @@ app; no email, name, wallet address or identity documents. Consent is required.
 `app.ts` now wires KYC's merged `createGetKycClaims(db)` adapter through
 `oidcRoutes`. A passed L1/L2/L3 yields `verified_human: true` and
 `verification_sandbox: true`; missing/unverified results omit both, never `false`.
-KYC is optional. Only `openid` is supported: `kyc_level` is not disclosed even if
-an adapter returns it. A future level scope needs its own explicit consent UI.
+KYC remains optional. An `openid`-only app never receives an exact level, even
+if an adapter returns it. An app may also request the `kyc_level` scope. The
+existing Continue page then explains that the app receives verification status
+and level when available; the same Allow and continue button grants that scope.
+There is no additional screen or checkbox. Cancel still exits sign-in. Existing
+openid-only grants must approve the newly requested scope before any level can
+be released. Login's connected-app list identifies apps with level-sharing grants.
 
 ## Local development
 

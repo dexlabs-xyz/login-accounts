@@ -122,8 +122,11 @@ export function createOidc(options: OidcOptions) {
       long: { sameSite: 'lax', httpOnly: true, secure },
     },
     features: { devInteractions: { enabled: false } },
-    scopes: ['openid'],
-    claims: { openid: ['sub', 'verified_human', 'verification_sandbox'] },
+    scopes: ['openid', 'kyc_level'],
+    claims: {
+      openid: ['sub', 'verified_human', 'verification_sandbox'],
+      kyc_level: ['kyc_level'],
+    },
     subjectTypes: ['pairwise'],
     pairwiseIdentifier: (_ctx, accountId, client) => store.subject(accountId, client.clientId),
     pkce: { required: () => true },
@@ -146,13 +149,17 @@ export function createOidc(options: OidcOptions) {
       async claims(_use, scope) {
         const claims = (await options.getKycClaims?.(accountId, scope.split(' '))) ?? {};
         // Match KYC: absence means not checked/unverified, never a negative assertion.
-        // This iteration supports openid only, so even an adapter returning a level
-        // cannot disclose it until a dedicated scope and consent flow are implemented.
+        // Exact levels require the separately requested, disclosed and granted scope.
+        // An openid-only app must not receive a level even if an adapter returns one.
         return {
           sub: accountId,
           ...(claims.verified_human === true
             ? {
                 verified_human: true,
+                ...(scope.split(' ').includes('kyc_level') &&
+                ['L1', 'L2', 'L3'].includes(claims.kyc_level ?? '')
+                  ? { kyc_level: claims.kyc_level }
+                  : {}),
                 ...(claims.verification_sandbox === true ? { verification_sandbox: true } : {}),
               }
             : {}),
@@ -319,6 +326,16 @@ export function createOidc(options: OidcOptions) {
           if (!grant) throw new Error('Grant missing');
           grant.addOIDCScope('openid');
           grant.addOIDCClaims(['verified_human', 'verification_sandbox']);
+          // The existing Continue action approves the disclosures shown on this page.
+          // A new scope makes old openid-only grants show this page again.
+          if (
+            String(interaction.params.scope ?? '')
+              .split(' ')
+              .includes('kyc_level')
+          ) {
+            grant.addOIDCScope('kyc_level');
+            grant.addOIDCClaims(['kyc_level']);
+          }
           const grantId = await grant.save();
           await provider.interactionFinished(
             req,
@@ -342,11 +359,16 @@ export function createOidc(options: OidcOptions) {
                 kyc.verification_sandbox === true ? ' (test mode)' : ''
               }</li></ul>`
             : `<p class="lead">${name} will see:</p><ul><li class="yes">An ID that only this app gets</li><li class="no">You haven’t verified you’re human, so it won’t see that. <a href="/#verification" target="_blank" rel="noopener">Verify on your Login account</a>, then sign in to this app again.</li></ul>`;
+        const levelNotice = String(interaction.params.scope ?? '')
+          .split(' ')
+          .includes('kyc_level')
+          ? `<p>By continuing, ${name} receives your verification status and level when available. No identity documents are shared. Verification is optional; you can continue without being verified.</p>`
+          : '';
         // Gold, 13 Nov: the app's style, laid out like a familiar "authorize this app" screen.
         page(
           res,
           200,
-          `${HANDSHAKE}<h1>${name} would like you to sign in with Login</h1><section class="sees">${sees}<p class="never">Your email, name, wallet and identity documents are never shared.</p></section><form method="post" action="/oidc/interaction/${id}/confirm"><button class="primary">Allow and continue</button></form><form method="post" action="/oidc/interaction/${id}/abort"><button class="quiet">Cancel</button></form><footer>Login · Testnet demo · Unaudited</footer>`,
+          `${HANDSHAKE}<h1>${name} would like you to sign in with Login</h1><section class="sees">${sees}${levelNotice}<p class="never">Your email, name, wallet and identity documents are never shared.</p></section><form method="post" action="/oidc/interaction/${id}/confirm"><button class="primary">Allow and continue</button></form><form method="post" action="/oidc/interaction/${id}/abort"><button class="quiet">Cancel</button></form><footer>Login · Testnet demo · Unaudited</footer>`,
         );
         return true;
       } catch {

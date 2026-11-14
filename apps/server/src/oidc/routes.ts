@@ -61,7 +61,7 @@ export function oidcRoutes(options: {
   /**
    * The apps this account has signed in to with Login, and what they can see.
    * From oidc_subjects (one row per account and app, made when the app first gets
-   * its per-app ID). Every app sees the same: that ID, and verified_human if passed.
+   * its per-app ID). Exact level sharing is recorded per app by its active grant.
    */
   routes.get('/api/oidc/apps', async (c) => {
     const user = options.sessions.getSignedInUser(c.req.header('cookie'));
@@ -72,7 +72,29 @@ export function oidcRoutes(options: {
       .all(user.userId) as { client_id: string }[];
     const kyc = (await options.getKycClaims?.(user.userId, ['openid'])) ?? {};
     return c.json({
-      apps: rows.map((r) => ({ name: names.get(r.client_id) ?? 'An app no longer listed' })),
+      apps: await Promise.all(
+        rows.map(async (r) => {
+          const grants = options.db
+            .prepare(
+              `SELECT id FROM oidc_records
+          WHERE model='Grant' AND json_extract(payload, '$.accountId')=?
+          AND json_extract(payload, '$.clientId')=? AND (expires_at IS NULL OR expires_at>?)`,
+            )
+            .all(user.userId, r.client_id, Math.floor(Date.now() / 1000)) as {
+            id: string;
+          }[];
+          let sharesVerificationLevel = false;
+          for (const row of grants) {
+            const grant = await oidc.provider.Grant.find(row.id);
+            if (grant?.getOIDCScope().split(' ').includes('kyc_level'))
+              sharesVerificationLevel = true;
+          }
+          return {
+            name: names.get(r.client_id) ?? 'An app no longer listed',
+            ...(sharesVerificationLevel ? { sharesVerificationLevel: true } : {}),
+          };
+        }),
+      ),
       verifiedHuman: kyc.verified_human === true,
       sandbox: kyc.verification_sandbox === true,
     });
