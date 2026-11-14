@@ -496,7 +496,9 @@ h3 { margin: 0.5rem 0 0; }
 
 /* ---------- Phones: top bar + bottom tabs instead of the sidebar ---------- */
 @media (max-width: 820px) {
-  .app { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 16px 84px; min-height: 0; }
+  /* align-content: start keeps the top bar and the page title at the top. Without it, the grid's two rows
+     share the spare height on short pages (Notifications, Verification) and both drift down. */
+  .app { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0 16px 84px; min-height: 0; align-content: start; }
   .sidebar, .app-divider { display: none; }
   .app-main { min-height: 0; justify-content: flex-start; padding: 8px 0 24px; }
   .activity.is-card { flex: none; height: auto; min-height: 240px; }
