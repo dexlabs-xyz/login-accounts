@@ -37,6 +37,7 @@ import {
 import { BroadcasterTransaction, WakuBroadcasterClient } from '@railgun-community/waku-broadcaster-client-web';
 import { getAddress, isAddress, JsonRpcProvider, ZeroAddress } from 'ethers';
 import { SEPOLIA_USDT, SEPOLIA_WETH } from './protocol.ts';
+import { pickBroadcaster, refusalReason } from './broadcasters.ts';
 
 const NETWORK = NetworkName.EthereumSepolia;
 const CHAIN = NETWORK_CONFIG[NETWORK].chain;
@@ -44,6 +45,19 @@ const V2 = TXIDVersion.V2_PoseidonMerkle;
 /** Refuse any broadcaster fee above this (0.002 ETH), whatever it claims. */
 const MAX_FEE_WEI = 2_000_000_000_000_000n;
 const FIND_BROADCASTER_MS = 60_000;
+/**
+ * Broadcasters tried per send before giving up (Gold, 13 Nov). Good broadcasters sometimes refuse a send for a while
+ * (e.g. their privacy-check data hasn't caught up with newly cleared funds) and accept it later or elsewhere, so a
+ * refusal tries the next most reliable one by itself instead of asking the user to press Review again.
+ */
+const MAX_BROADCASTER_TRIES = 3;
+/**
+ * Wait before trying again. Seen live (13 Nov): "Could not validate Proof of Innocence", for funds that had cleared
+ * for our wallet 90 seconds earlier. The broadcaster's privacy-check data lags behind ours, so an instant retry
+ * elsewhere fails the same way; a little later it goes through.
+ */
+const RETRY_AFTER_MS = 30_000;
+
 
 export interface SendContext {
   walletId: string;
@@ -59,12 +73,16 @@ export interface SendContext {
   /** Public addresses that funded the user's deposits (lowercase): withdrawing to one links them publicly. */
   depositFunders: () => Promise<Set<string>>;
   onProgress: (progress: number) => void;
+  /** A broadcaster refused and the next one is being tried (attempt = how many have refused so far). */
+  onRetry: (attempt: number) => void;
 }
 
 /** 'transfer': to another private 0zk address. 'unshield': out to a public address (withdraw). */
 export type SendKind = 'transfer' | 'unshield';
 
 interface PendingQuote {
+  /** What quote() was asked, so a refused send can be priced again with the next broadcaster. */
+  params: unknown;
   kind: SendKind;
   to: string;
   amount: bigint;
@@ -92,7 +110,10 @@ export class SendError extends Error {
   ) {
     super(code, cause === undefined ? undefined : { cause });
     this.name = code; // the page only ever sees error names
+    if (code === 'broadcaster-refused') this.reason = refusalReason(this);
   }
+  /** broadcaster-refused only: the broadcaster's short reason (see refusalReason). */
+  reason?: string;
 }
 
 export function createSender(ctx: SendContext) {
@@ -109,7 +130,8 @@ export function createSender(ctx: SendContext) {
     await started;
     const t0 = Date.now();
     for (;;) {
-      const b = WakuBroadcasterClient.findBestBroadcaster(CHAIN, SEPOLIA_WETH, false);
+      // The most reliable, not the client's cheapest pick (see broadcasters.ts). Skips any that refused us.
+      const b = pickBroadcaster<SelectedBroadcaster>(WakuBroadcasterClient.findBroadcastersForToken(CHAIN, SEPOLIA_WETH, false));
       if (b) return b;
       if (Date.now() - t0 > FIND_BROADCASTER_MS) throw new SendError('no-broadcaster');
       await sleep(3_000);
@@ -120,7 +142,7 @@ export function createSender(ctx: SendContext) {
     { tokenAddress: SEPOLIA_USDT, amount: q.amount, recipientAddress: q.to },
   ];
 
-  return {
+  const api = {
     /** Price a send: check the address and balances, pick a broadcaster, estimate its fee. */
     async quote(params: unknown) {
       const {
@@ -227,7 +249,7 @@ export function createSender(ctx: SendContext) {
 
       const quoteId = crypto.randomUUID();
       const expiresAt = Math.min(broadcaster.tokenFee.expiration, Date.now() + 5 * 60_000);
-      quotes.set(quoteId, { kind, to, amount, broadcaster, gasDetails, fee, expiresAt });
+      quotes.set(quoteId, { params, kind, to, amount, broadcaster, gasDetails, fee, expiresAt });
       return {
         quoteId,
         to,
@@ -239,75 +261,111 @@ export function createSender(ctx: SendContext) {
       };
     },
 
-    /** Prove and submit a priced send or withdrawal. The page asks for the passkey first (D5). */
+    /**
+     * Prove and submit a priced send or withdrawal. The page asks for the passkey first (D5). If the broadcaster
+     * refuses (nothing is sent), try the next most reliable one, up to MAX_BROADCASTER_TRIES, but never for a higher
+     * fee than the one the user approved: the approval still holds for the same send at the same or a lower fee.
+     */
     async execute(params: unknown) {
       const { quoteId } = params as { quoteId: string };
-      const q = quotes.get(quoteId);
-      quotes.delete(quoteId);
-      if (!q || Date.now() > q.expiresAt) throw new SendError('quote-expired');
-
-      const feeRecipient = { tokenAddress: SEPOLIA_WETH, amount: q.fee, recipientAddress: q.broadcaster.railgunAddress };
-      const minGasPrice = calculateGasPrice(q.gasDetails);
-      const { transaction, nullifiers, preTransactionPOIsPerTxidLeafPerList } =
-        q.kind === 'transfer'
-          ? await (async () => {
-              await generateTransferProof(
-                V2,
-                NETWORK,
-                ctx.walletId,
-                ctx.encryptionKey,
-                false, // don't reveal the sender's address to the recipient
-                undefined,
-                recipients(q),
-                [],
-                feeRecipient,
-                false,
-                minGasPrice,
-                (progress) => ctx.onProgress(progress),
-              );
-              return populateProvedTransfer(V2, NETWORK, ctx.walletId, false, undefined, recipients(q), [], feeRecipient, false, minGasPrice, q.gasDetails);
-            })()
-          : await (async () => {
-              await generateUnshieldProof(
-                V2,
-                NETWORK,
-                ctx.walletId,
-                ctx.encryptionKey,
-                recipients(q),
-                [],
-                feeRecipient,
-                false,
-                minGasPrice,
-                (progress) => ctx.onProgress(progress),
-              );
-              return populateProvedUnshield(V2, NETWORK, ctx.walletId, recipients(q), [], feeRecipient, false, minGasPrice, q.gasDetails);
-            })();
-      const tx = await BroadcasterTransaction.create(
-        V2,
-        transaction.to,
-        transaction.data,
-        q.broadcaster.railgunAddress,
-        q.broadcaster.tokenFee.feesID,
-        CHAIN,
-        nullifiers ?? [],
-        minGasPrice,
-        false,
-        preTransactionPOIsPerTxidLeafPerList,
-      );
-      let txHash: string;
-      try {
-        txHash = await tx.send();
-      } catch (e) {
-        // The broadcaster refused (e.g. its privacy-check node can't confirm our funds yet).
-        // Nothing was sent. Skip this broadcaster next time, so "Review" again tries another.
-        if (e instanceof Error && /response error from broadcaster/i.test(e.message)) {
-          refused.add(q.broadcaster.railgunAddress);
-          WakuBroadcasterClient.setAddressFilters(undefined, [...refused]);
-          throw new SendError('broadcaster-refused', e);
+      let q = takeQuote(quoteId);
+      const approvedFee = q.fee;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await submit(q);
+        } catch (e) {
+          if (!(e instanceof SendError && e.code === 'broadcaster-refused') || attempt >= MAX_BROADCASTER_TRIES) throw e;
+          ctx.onRetry(attempt);
+          await sleep(RETRY_AFTER_MS);
+          let next: PendingQuote;
+          try {
+            next = takeQuote((await api.quote(q.params)).quoteId); // the refused broadcaster is filtered out now
+          } catch (why) {
+            // No other broadcaster (or the wallet changed): report the refusal. Development builds say why it stopped.
+            if (import.meta.env.DEV) console.error('[railgun send] retry stopped: re-quote failed', why instanceof Error ? why.message : why);
+            throw e;
+          }
+          if (next.fee > approvedFee) {
+            if (import.meta.env.DEV) console.error('[railgun send] retry stopped: next fee higher', next.fee.toString(), approvedFee.toString());
+            throw e;
+          }
+          q = next;
         }
-        throw e;
       }
-      return { txHash };
     },
   };
+
+  function takeQuote(quoteId: string): PendingQuote {
+    const q = quotes.get(quoteId);
+    quotes.delete(quoteId);
+    if (!q || Date.now() > q.expiresAt) throw new SendError('quote-expired');
+    return q;
+  }
+
+  /** One attempt: prove for this quote's broadcaster and hand the transaction to it. */
+  async function submit(q: PendingQuote): Promise<{ txHash: string }> {
+    const feeRecipient = { tokenAddress: SEPOLIA_WETH, amount: q.fee, recipientAddress: q.broadcaster.railgunAddress };
+    const minGasPrice = calculateGasPrice(q.gasDetails);
+    const { transaction, nullifiers, preTransactionPOIsPerTxidLeafPerList } =
+      q.kind === 'transfer'
+        ? await (async () => {
+            await generateTransferProof(
+              V2,
+              NETWORK,
+              ctx.walletId,
+              ctx.encryptionKey,
+              false, // don't reveal the sender's address to the recipient
+              undefined,
+              recipients(q),
+              [],
+              feeRecipient,
+              false,
+              minGasPrice,
+              (progress) => ctx.onProgress(progress),
+            );
+            return populateProvedTransfer(V2, NETWORK, ctx.walletId, false, undefined, recipients(q), [], feeRecipient, false, minGasPrice, q.gasDetails);
+          })()
+        : await (async () => {
+            await generateUnshieldProof(
+              V2,
+              NETWORK,
+              ctx.walletId,
+              ctx.encryptionKey,
+              recipients(q),
+              [],
+              feeRecipient,
+              false,
+              minGasPrice,
+              (progress) => ctx.onProgress(progress),
+            );
+            return populateProvedUnshield(V2, NETWORK, ctx.walletId, recipients(q), [], feeRecipient, false, minGasPrice, q.gasDetails);
+          })();
+    const tx = await BroadcasterTransaction.create(
+      V2,
+      transaction.to,
+      transaction.data,
+      q.broadcaster.railgunAddress,
+      q.broadcaster.tokenFee.feesID,
+      CHAIN,
+      nullifiers ?? [],
+      minGasPrice,
+      false,
+      preTransactionPOIsPerTxidLeafPerList,
+    );
+    let txHash: string;
+    try {
+      txHash = await tx.send();
+    } catch (e) {
+      // The broadcaster refused (e.g. its privacy-check node can't confirm our funds yet).
+      // Nothing was sent. Skip this broadcaster next time, so "Review" again tries another.
+      if (e instanceof Error && /response error from broadcaster/i.test(e.message)) {
+        refused.add(q.broadcaster.railgunAddress);
+        WakuBroadcasterClient.setAddressFilters(undefined, [...refused]);
+        throw new SendError('broadcaster-refused', e);
+      }
+      throw e;
+    }
+    return { txHash };
+  }
+  return api;
 }

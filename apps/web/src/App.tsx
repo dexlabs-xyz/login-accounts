@@ -21,6 +21,7 @@ import { usePendingDeposits, usePendingSends } from './deposits/pending.ts';
 import { sendJobs } from './send/jobs.ts';
 import type { SendMode } from './send/SendPrivately.tsx';
 import { SendSheet } from './send/SendSheet.tsx';
+import { StatusIcon } from './ui/StatusIcon.tsx';
 import { formatUnits } from './deposits/tidepool.ts';
 import {
   addPasskey,
@@ -134,7 +135,9 @@ const BUCKET_LABELS: Record<string, string> = {
   ShieldPending: 'Arriving (being checked)',
   ShieldBlocked: 'Blocked by sanctions screening',
   ProofSubmitted: 'Being confirmed',
-  MissingInternalPOI: 'Waiting for privacy check',
+  // What's left after your own send or withdrawal. On Sepolia it never clears (Railgun's broken testnet index; README,
+  // Known limit), so don't promise a wait (Gold, 13 Nov).
+  MissingInternalPOI: 'left over from your last send, locked on this test network',
   MissingExternalPOI: 'Waiting for privacy check',
 };
 
@@ -238,7 +241,15 @@ function PrivateBalance({
   // One currency on screen: the private ETH that pays network fees (testnet only) is not shown as a balance.
   const rows = all.filter((r) => !isReserve(r.tokenAddress));
   const reserve = all.filter((r) => isReserve(r.tokenAddress));
-  const reserveState = reserve.some((r) => r.bucket === 'Spendable') ? 'ready' : reserve.length ? 'pending' : 'empty';
+  // pending: a new deposit's reserve, still in its privacy check (it clears). used: only what was left after a send,
+  // which stays locked on Sepolia (README, Known limit), so only a new deposit covers fees again.
+  const reserveState = reserve.some((r) => r.bucket === 'Spendable')
+    ? 'ready'
+    : reserve.some((r) => r.bucket === 'ShieldPending' || r.bucket === 'MissingExternalPOI')
+      ? 'pending'
+      : reserve.length
+        ? 'used'
+        : 'empty';
   const money = (address: string, amount: string) => {
     const t = KNOWN_TOKENS[address.toLowerCase()];
     if (hidden) return '••••';
@@ -292,16 +303,18 @@ function PrivateBalance({
             ))}
           {pw.status === 'ready' && (
             <p
-              // "Network fees are covered." is the normal state, so it isn't shown (Gold, 13 Nov); kept for screen readers
-              // and the tests. Only a reserve that's still being set up shows.
-              className={reserveState === 'pending' ? 'hero-status' : 'visually-hidden'}
+              // Never shown (Gold, 13 Nov: people don't need to know about the fee reserve); kept for screen readers and the
+              // tests. If there's nothing to pay a fee with, the send's error toast says what to do.
+              className="visually-hidden"
               data-testid={`fee-reserve-${reserveState}`}
             >
               {reserveState === 'ready'
                 ? 'Network fees are covered.'
                 : reserveState === 'pending'
                   ? 'Network fees: being set up. Covered once your new funds clear.'
-                  : 'Your next deposit sets aside a little to cover network fees for sending and withdrawing.'}
+                  : reserveState === 'used'
+                    ? 'Network fees: used up. Add money to cover them again.'
+                    : 'Your next deposit sets aside a little to cover network fees for sending and withdrawing.'}
             </p>
           )}
         </div>
@@ -359,17 +372,20 @@ function Main() {
     void refresh();
   }, [refresh]);
 
+  // Signed out: forget the page (#settings etc.) so signing up or in always lands on Home. Signing out from Settings
+  // left #settings in the address and the next sign-in opened Settings (Gold, 13 Nov). A reload while signed in keeps it.
+  useEffect(() => {
+    if (me === null && location.hash) history.replaceState(null, '', location.pathname + location.search);
+  }, [me]);
+
   const onOutcome = async (o: WalletOutcome) => {
     setNote(outcomeNote(o));
     await refresh();
   };
 
-  if (me === 'loading')
-    return (
-      <Shell>
-        <p className="muted">Loading…</p>
-      </Shell>
-    );
+  // Checking whether you're signed in: just the page colour (Gold, 13 Nov). It's usually a split second, and the old
+  // "Login / Loading… / Testnet build" screen flashed in a different style before Welcome or Home.
+  if (me === 'loading') return <main className="blank" aria-busy="true" aria-label="Loading" />;
   if (!me) return <Join onDone={onOutcome} />;
   return <Account me={me} note={note} setNote={setNote} refresh={refresh} />;
 }
@@ -736,7 +752,7 @@ function Join({
     check === 'checking' ? (
       <img className="field-icon" src="/img/loader-spinning.svg" alt="" width={24} height={24} />
     ) : check === 'valid' ? (
-      <img className="field-icon pop" src="/img/check-circled.svg" alt="" width={24} height={24} />
+      <StatusIcon kind="ok" className="field-icon pop" />
     ) : check === 'invalid' ? (
       <button
         type="button"
@@ -747,7 +763,7 @@ function Join({
           emailInput.current?.focus();
         }}
       >
-        <img src="/img/x-circled.svg" alt="" width={24} height={24} />
+        <StatusIcon kind="bad" />
       </button>
     ) : null;
 
@@ -897,21 +913,21 @@ function SignInHandoff() {
     api('GET', '/api/me').then(complete, () => setState('sign-in'));
   }, [valid, fresh, complete]);
 
+  // Same look as Welcome (Gold, 13 Nov), not the old plain screen.
   if (!valid) {
     return (
-      <Shell>
-        <h1>This sign-in link doesn’t work</h1>
-        <p role="alert" className="error">
+      <Welcome heading="This sign-in link doesn’t work" learnMore={false}>
+        <p className="welcome-lead" role="alert">
           Go back to the app you came from and try signing in again.
         </p>
-      </Shell>
+      </Welcome>
     );
   }
   if (state !== 'sign-in') {
     return (
-      <Shell>
-        <p className="muted">{state === 'leaving' ? 'Taking you back to the app…' : 'Checking…'}</p>
-      </Shell>
+      <Welcome heading={state === 'leaving' ? 'Taking you back to the app…' : 'Checking…'} learnMore={false}>
+        <img className="welcome-spinner" src="/img/loader-spinning.svg" alt="" width={28} height={28} />
+      </Welcome>
     );
   }
   return (

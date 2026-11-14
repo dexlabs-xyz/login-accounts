@@ -31,6 +31,8 @@ export interface PrivateWalletState {
   deposits: DepositRecord[];
   /** Proof generation progress for a private send in flight (0..100), or null. */
   sendProgress: number | null;
+  /** How many broadcasters refused the send in flight (the next one is being tried). */
+  sendRetries: number;
 }
 
 const initial: PrivateWalletState = {
@@ -42,6 +44,7 @@ const initial: PrivateWalletState = {
   error: null,
   deposits: [],
   sendProgress: null,
+  sendRetries: 0,
 };
 let nextCallId = 1;
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -80,12 +83,14 @@ export const privateWallet = {
       else if (m.type === 'balances') set({ balances: { ...state.balances, [m.bucket]: m.erc20 } });
       else if (m.type === 'deposits') set({ deposits: m.records });
       else if (m.type === 'send-progress') set({ sendProgress: m.progress });
+      else if (m.type === 'send-retry') set({ sendRetries: m.attempt, sendProgress: null });
       else if (m.type === 'result') {
         const p = pending.get(m.id);
         pending.delete(m.id);
         if (m.ok) p?.resolve(m.value);
         else {
-          const err = new Error(m.error);
+          const err = new Error(m.error) as Error & { reason?: string };
+          if (m.reason) err.reason = m.reason;
           if (import.meta.env.DEV && m.detail) {
             console.error('[railgun worker]', m.detail);
             // Development only, so testers can copy it from the screen. Never in production builds.
@@ -115,7 +120,7 @@ export const privateWallet = {
   },
 
   clearSendProgress() {
-    set({ sendProgress: null });
+    set({ sendProgress: null, sendRetries: 0 });
   },
 
   /** Ask the worker to do something (deposits, sends). Rejects if the wallet is locked. */

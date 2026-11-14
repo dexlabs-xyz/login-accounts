@@ -17,6 +17,9 @@ changes **how things look and move**, not what they do or say about safety.
 - `apps/web/src/styles.css`: all styling. Colour tokens and dark mode live here.
 - The consent screen for other apps is server-rendered HTML in
   `apps/server/src/oidc/provider.ts` (the `page(...)` calls).
+  Restyled 13 Nov (Gold): `PAGE_CSS` (inline, Geist from /fonts, follows the device's dark/light), a
+  heart-handshake icon, "<App> would like you to sign in with Login", a box of what the app sees. CSP adds
+  `font-src 'self'` only. The page must never contain the email or a KYC level (routes.test.ts).
 
 ## Don't touch
 
@@ -55,6 +58,8 @@ test in the same change and say so:
   layout). That includes "You could lose access to your money" (sticky while it's true), the sign-in-only passkey choice
   (a toast with Keep for signing in / Remove it), a stalled sync (toast with Retry sync), sign-up errors and KYC errors.
   Use `useToastWhile(text, options)` from `ui/toast.tsx`. e2e helpers: `errorToast`, `toastWith(page, text)`.
+- **Marks on coloured fills** (text on the blue buttons, the email field's green tick and red cross): black in dark
+  mode, white in light, via `--on-accent` (Gold, 13 Nov). The tick and cross are `ui/StatusIcon.tsx` (inline SVG), also on the Send "Sent" screen.
   Content that belongs to a screen stays on it: Syncing % next to the balance, Send/Receive steps and their review
   warnings, the verification stages, the broken sign-in link page.
   Unfinished deposits sit at the top of Notifications (`li[data-kind="pending"]`, Resume / Finish). Since 13 Nov:

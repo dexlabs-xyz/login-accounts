@@ -443,7 +443,7 @@ for (const level of ['L1', 'L2'] as const)
     expect(f.consentPages.at(-1)).toContain(
       'receives your verification status and level when available',
     );
-    expect(f.consentPages.at(-1)).toContain('<button>Allow and continue</button>');
+    expect(f.consentPages.at(-1)).toMatch(/<button(?:\s[^>]*)?>Allow and continue<\/button>/);
     expect(f.consentPages.at(-1)).not.toContain('checkbox');
     expect((await userInfo('app-a', 'openid')).info.kyc_level).toBeUndefined();
     const other = await userInfo('app-b', 'openid');

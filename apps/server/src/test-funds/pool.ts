@@ -132,6 +132,39 @@ export function grossForShield(net: bigint, feeBasisPoints: bigint): bigint {
   return (net * 10_000n + keep - 1n) / keep;
 }
 
+/**
+ * TESTNET ONLY. Splits `total` into `count` pieces that each differ by `step` and add up to `total` exactly.
+ *
+ * Why (team lead, 13 Nov): on Sepolia, what's left after a send or withdrawal never clears Railgun's privacy check
+ * (README, Known limit), so one piece of money pays for one transaction. Railgun spends the smallest pieces that
+ * cover a send, so a claim in several pieces pays for several. The pieces differ slightly so no two are identical.
+ */
+export function splitIntoPieces(total: bigint, count: number, step: bigint): bigint[] {
+  const n = BigInt(count);
+  const mid = (n - 1n) / 2n;
+  // Centred offsets (…, -step, 0, +step, …) cancel out for an odd count; the rounding remainder goes on the largest.
+  const offsets = Array.from({ length: count }, (_, i) => (BigInt(i) - mid) * step);
+  const base = (total - offsets.reduce((a, b) => a + b, 0n)) / n;
+  const pieces = offsets.map((o) => base + o);
+  pieces[count - 1]! += total - pieces.reduce((a, b) => a + b, 0n);
+  if (pieces.some((p) => p <= 0n)) throw new Error('Pieces too small.');
+  return pieces;
+}
+
+/**
+ * TESTNET ONLY. `count` pieces of at least `base`, each `step` more than the last (base, base+step, …), so no two
+ * are identical and none is below `base`. Railgun spends the smallest pieces first until the amount is covered, so
+ * with every piece at least $10 a send of $10 or less uses exactly one (team lead, 13 Nov: the demo sends $10 at a
+ * time). A piece spread below $10 would make a $10 send take two.
+ */
+export function piecesFrom(base: bigint, count: number, step: bigint): bigint[] {
+  return Array.from({ length: count }, (_, i) => base + BigInt(i) * step);
+}
+
+/** What the pool pays for these pieces: each is a separate shield, and Railgun takes its fee from each one. */
+export const grossForPieces = (pieces: readonly bigint[], feeBasisPoints: bigint) =>
+  pieces.reduce((t, p) => t + grossForShield(p, feeBasisPoints), 0n);
+
 async function feeData(pool: Pool) {
   const f = await pool.provider.getFeeData();
   return { maxFeePerGas: f.maxFeePerGas ?? 0n, maxPriorityFeePerGas: f.maxPriorityFeePerGas ?? 0n };
@@ -219,10 +252,16 @@ async function ensureAllowance(pool: Pool, token: string, amount: bigint) {
  * reserve. Amounts are what the claimer receives; Railgun's shield fee is added
  * on top. Public ETH is wrapped into WETH in batches of `wrapBatchWei`.
  */
-export async function shieldClaim(pool: Pool, to: string, net: { usdt: bigint; weth: bigint }, wrapBatchWei: bigint): Promise<string> {
+/** One shield of every piece (see splitIntoPieces): the claimer receives each piece exactly, as its own note. */
+export async function shieldClaim(
+  pool: Pool,
+  to: string,
+  net: { usdt: readonly bigint[]; weth: readonly bigint[] },
+  wrapBatchWei: bigint,
+): Promise<string> {
   const owner = pool.publicWallet.address;
-  const usdt = grossForShield(net.usdt, pool.shieldFeeBasisPoints);
-  const weth = grossForShield(net.weth, pool.shieldFeeBasisPoints);
+  const usdt = grossForPieces(net.usdt, pool.shieldFeeBasisPoints);
+  const weth = grossForPieces(net.weth, pool.shieldFeeBasisPoints);
   const have = await publicBalances(pool);
   if (have.usdt < usdt) throw new Error('pool-empty');
   if (have.weth < weth) {
@@ -235,8 +274,8 @@ export async function shieldClaim(pool: Pool, to: string, net: { usdt: bigint; w
   await ensureAllowance(pool, SEPOLIA_WETH, weth);
   const key = await shieldKey(pool);
   const recipients = [
-    { tokenAddress: SEPOLIA_USDT, amount: usdt, recipientAddress: to },
-    { tokenAddress: SEPOLIA_WETH, amount: weth, recipientAddress: to },
+    ...net.usdt.map((p) => ({ tokenAddress: SEPOLIA_USDT, amount: grossForShield(p, pool.shieldFeeBasisPoints), recipientAddress: to })),
+    ...net.weth.map((p) => ({ tokenAddress: SEPOLIA_WETH, amount: grossForShield(p, pool.shieldFeeBasisPoints), recipientAddress: to })),
   ];
   const { gasEstimate } = await gasEstimateForShield(V2, NETWORK, key, recipients, [], owner);
   const { transaction } = await populateShield(V2, NETWORK, key, recipients, [], {
